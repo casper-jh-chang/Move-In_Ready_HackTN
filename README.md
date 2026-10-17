@@ -6,7 +6,7 @@ English | [中文](README.zh-CN.md)
 
 Move-In Ready gets usable furniture from people who are moving out to neighbors who are moving in after homelessness, instead of to the landfill. It is built around the real workflow of **[House2Home Nashville](https://www.house2homenashville.org/)**, a volunteer-run furniture bank, and uses **OCI Generative AI** to take the slowest manual steps off volunteers' plates. A human always makes the final call.
 
-> Status: we picked this topic on 2026-10-17. Implementation hasn't started yet. Everything below describes the plan. All data in this project is synthetic. We are not affiliated with House2Home and use no real client or donor information.
+> Status: we picked this topic on 2026-10-17. The first module, video pre-screening with automatic inventory entry, is built and runs locally (see [docs/video-intake.md](docs/video-intake.md)). The rest of this page is still the plan. All data in this project is synthetic. We are not affiliated with House2Home and use no real client or donor information.
 
 ---
 
@@ -36,7 +36,7 @@ Full analysis (in Chinese): [docs/house2home-analysis.md](docs/house2home-analys
 
 ### MVP (must-have)
 
-1. **Photo pre-screening.** A donor uploads photos of their items. An OCI GenAI vision model identifies the category, estimates the size, and looks for stains, damage, or pet hair. It checks each item against House2Home's accept/decline rules and returns **Accept**, **Decline (with reason)**, or **Needs human review**. Declined items get a suggestion for where else to take them (for example, large appliances → Habitat ReStore).
+1. **Video pre-screening** *(built)*. A donor records one short walk-around video and describes the item out loud. An OCI GenAI multimodal model watches and listens, identifies the category, estimates the size, and looks for stains, damage, or pet hair. It checks each item against House2Home's accept/decline rules and returns **Accept**, **Decline (with reason)**, or **Needs human review**. Declined items get a suggestion for where else to take them (for example, large appliances → Habitat ReStore).
 2. **Automatic inventory.** Each accepted item becomes an inventory card with category, room, size, condition, photo, location, and status (*pledged → in warehouse → assigned → delivered*).
 3. **Household matching.** An LLM turns a caseworker referral (checkboxes plus free-text notes like *"client uses a wheelchair, third floor, no elevator"*) into structured needs. The system then assembles a **household kit** from stock and pledged items and flags what's missing. A missing bed → "use cash fund". Missing small items → "add to this month's Amazon wishlist".
 4. **Volunteer dashboard.** Review queue, inventory, kits, and gaps in one place.
@@ -97,7 +97,16 @@ Full analysis (in Chinese): [docs/house2home-analysis.md](docs/house2home-analys
 
 ## Running locally
 
-The app hasn't been scaffolded yet. Setup instructions will be added here once it is.
+Requires Python 3.11+, Node 18+ and ffmpeg. The default `mock` AI provider needs no cloud account.
+
+```bash
+cd backend && pip install -r requirements.txt && cp .env.example .env
+uvicorn app.main:app --reload --port 8000
+
+cd frontend && npm install && npm run dev   # http://localhost:5173
+```
+
+Tests: `cd backend && python -m pytest -q`. OCI setup, the rule table and the API are in [docs/video-intake.md](docs/video-intake.md).
 
 ---
 
@@ -119,4 +128,10 @@ docs/
   needs-research.md         Local needs research (Nashville)
   house2home-analysis.md    Deep dive on House2Home's workflow
   h2h-outreach-email.md     Outreach email draft
+  video-intake.md           Video pre-screening: design, rules, setup (in Chinese)
+backend/
+  app/                      FastAPI: ffmpeg keyframes, OCI GenAI analysis, rules engine, SQLite inventory
+  rules/house2home.json     Accept/decline rules, alternatives, weight estimates
+frontend/
+  src/                      React: record with guidance + live captions, results, volunteer review
 ```

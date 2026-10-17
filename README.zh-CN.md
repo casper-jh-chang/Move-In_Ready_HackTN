@@ -6,7 +6,7 @@
 
 有人搬走，留下还能用的家具；有人刚结束无家可归的日子，搬进空荡荡的新家。Move-In Ready 把前者的家具送到后者手里，不让它们进填埋场。整个设计围绕 **[House2Home Nashville](https://www.house2homenashville.org/)** 的真实流程。这是一家全部由志愿者运营的家具银行。我们用 **OCI Generative AI** 接手最耗志愿者时间的人工环节，但最终决定始终由人来做。
 
-> 当前状态：选题于 2026-10-17 确定，还没开始写代码，下文都是计划。本项目只使用合成数据。我们和 House2Home 没有隶属关系，也不使用任何真实的客户或捐赠者信息。
+> 当前状态：选题于 2026-10-17 确定，第一个模块“视频预审 + 自动入库”已经做好，可以在本地运行（见 [docs/video-intake.md](docs/video-intake.md)），其余部分仍是计划。本项目只使用合成数据。我们和 House2Home 没有隶属关系，也不使用任何真实的客户或捐赠者信息。
 
 ---
 
@@ -36,7 +36,7 @@
 
 ### MVP（必做）
 
-1. **拍照预审。** 捐赠者上传物品照片，OCI GenAI 视觉模型识别品类、估计尺寸，检查污渍、破损和宠物毛发，再对照 House2Home 的“收与不收”规则，给出**接收**、**拒收（附原因）**或**转人工**。拒收时推荐其他去处，例如大家电可以交给 Habitat ReStore。
+1. **视频预审**（*已完成*）。捐赠者绕着家具拍一段短视频并口头介绍，OCI GenAI 多模态模型同时看画面、听语音，识别品类、估计尺寸，检查污渍、破损和宠物毛发，再对照 House2Home 的“收与不收”规则，给出**接收**、**拒收（附原因）**或**转人工**。拒收时推荐其他去处，例如大家电可以交给 Habitat ReStore。
 2. **自动入库。** 每件接收的物品自动生成库存卡片，包括品类、房间、尺寸、成色、照片、存放位置和状态（*已认捐 → 在库 → 已分配 → 已送达*）。
 3. **按户匹配。** LLM 把社工的转介表（勾选项，加上“客户坐轮椅，住三楼，没电梯”这类补充说明）转成结构化需求。系统再用库存和已认捐的物品给每户配一套**家具包**，并标出缺口：缺床就提示动用现金基金，缺小件就加进当月的 Amazon 认捐清单。
 4. **志愿者仪表盘。** 审核队列、库存、家具包和缺口集中在一个界面里。
@@ -97,7 +97,16 @@
 
 ## 本地运行
 
-应用还没有搭建，搭好后会在这里补上运行步骤。
+需要 Python 3.11+、Node 18+ 和 ffmpeg。默认的 `mock` 模式不需要任何云账号。
+
+```bash
+cd backend && pip install -r requirements.txt && cp .env.example .env
+uvicorn app.main:app --reload --port 8000
+
+cd frontend && npm install && npm run dev   # http://localhost:5173
+```
+
+测试：`cd backend && python -m pytest -q`。接入 OCI、规则表和接口说明见 [docs/video-intake.md](docs/video-intake.md)。
 
 ---
 
@@ -119,4 +128,10 @@ docs/
   needs-research.md         纳什维尔本地需求调研
   house2home-analysis.md    House2Home 流程拆解
   h2h-outreach-email.md     外联邮件草稿
+  video-intake.md           视频预审：设计、规则、运行说明
+backend/
+  app/                      FastAPI：ffmpeg 抽帧、OCI GenAI 分析、规则引擎、SQLite 库存
+  rules/house2home.json     收与不收规则、替代去处、估重
+frontend/
+  src/                      React：带引导和实时字幕的录制页、结果页、志愿者后台
 ```
