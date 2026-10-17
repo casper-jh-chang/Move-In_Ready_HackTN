@@ -97,16 +97,17 @@ Full analysis (in Chinese): [docs/house2home-analysis.md](docs/house2home-analys
 
 ## Running locally
 
-Requires Python 3.11+, Node 18+ and ffmpeg. The default `mock` AI provider needs no cloud account.
+Requires Node 16.20+, MySQL 8, Python 3.11+ and ffmpeg. The default `mock` AI provider needs no cloud account.
+
+The app lives in `app/` (React + Express + MySQL; setup in [app/README.md](app/README.md)). The AI video intake runs as a separate Python service in `vision-service/`:
 
 ```bash
-cd backend && pip install -r requirements.txt && cp .env.example .env
-uvicorn app.main:app --reload --port 8000
-
-cd frontend && npm install && npm run dev   # http://localhost:5173
+cd vision-service && pip install -r requirements.txt && cp .env.example .env
+cd ../app && npm install && cp .env.example .env && npm run db:init
+npm run dev:video     # vision service :8000 + API :3001 + web :5173
 ```
 
-Tests: `cd backend && python -m pytest -q`. OCI setup, the rule table and the API are in [docs/video-intake.md](docs/video-intake.md).
+Tests: `cd vision-service && python -m pytest -q`. Local models, OCI setup and the rule table are in [docs/video-intake.md](docs/video-intake.md).
 
 ---
 
@@ -129,9 +130,10 @@ docs/
   house2home-analysis.md    Deep dive on House2Home's workflow
   h2h-outreach-email.md     Outreach email draft
   video-intake.md           Video pre-screening: design, rules, setup (in Chinese)
-backend/
-  app/                      FastAPI: ffmpeg keyframes, OCI GenAI analysis, rules engine, SQLite inventory
+app/                        Web app: React frontend, Express API, MySQL (donors, admins, volunteers, recipients)
+  src/pages/VideoIntake.tsx Record/upload a walk-around video, review AI results, submit
+  server/vision.cjs         Streams videos to the vision service, stores its verdict
+vision-service/
+  app/                      FastAPI: ffmpeg keyframes, multimodal model (mock/Ollama/OCI), rules engine
   rules/house2home.json     Accept/decline rules, alternatives, weight estimates
-frontend/
-  src/                      React: record with guidance + live captions, results, volunteer review
 ```

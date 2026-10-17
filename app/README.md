@@ -77,16 +77,22 @@ Open http://localhost:5173. The Express API runs at http://localhost:3001.
 | Donor | donor1@demo.org, donor2@demo.org, donor3@demo.org |
 | User | user1@demo.org, user2@demo.org |
 
-## Vision model (not implemented yet)
+## AI video intake
 
-The vision model is intentionally left blank:
+Donors can record (or upload) a 30–60 second walk-around video and describe the item out loud. Entry points: **Donate with a video** on *My donations*, and **AI video intake** inside the regular donation form.
 
-- `server/vision.cjs`: `isConfigured()` / `analyzePhoto()` stubs with the expected contract
-- `POST /api/vision` returns `501` until the stub is implemented
-- `furniture.vision_result` column is reserved for the model's output
-- The "AI photo review (coming soon)" button in `src/pages/Donor.tsx` is disabled
+- The Python service in `../vision-service` picks sharp keyframes with ffmpeg, asks a multimodal model what it sees and hears (category, condition, defects with timestamps, sleeper-sofa check, sides shown), and applies the acceptance rules in `vision-service/rules/house2home.json`. The model only describes; the rules suggest accept / review / decline with the rule that fired.
+- `server/vision.cjs` streams the upload to that service and pre-fills one donation per item found. The donor edits and submits; items are saved as `pending` with the AI verdict in `furniture.vision_result`. The server re-reads the verdict from the service (and checks it belongs to that donor) instead of trusting the browser.
+- Admins see the AI verdict on each card and, in Approve/Reject, the video, the rule reasons and defect frames that jump to the right second. A rejection is pre-filled with the rule reason. **An admin still makes every decision.**
 
-Rule-based screening (excluded categories, damage keywords, missing photo) still runs on every donation.
+Run it (needs Python 3.11+ and ffmpeg):
+
+```bash
+cd ../vision-service && pip install -r requirements.txt && cp .env.example .env
+cd ../app && npm run dev:video     # vision service + API + Vite together
+```
+
+`VISION_PROVIDER=mock` (default) returns canned results with no model; `ollama` runs a local vision model; `oci` uses OCI Generative AI. Details: `../docs/video-intake.md`. If the service is down, the rest of the app keeps working and the video modal says how to start it.
 
 ## API overview
 
@@ -96,6 +102,9 @@ Rule-based screening (excluded categories, damage keywords, missing photo) still
 | `GET/PATCH /api/auth/me`, `POST /api/auth/logout`, `GET /api/stats`, `GET /api/impact` | Any signed-in user |
 | `POST /api/furniture`, `GET /api/furniture/mine`, `DELETE /api/furniture/:id` | Donor |
 | `GET /api/furniture/available`, `POST /api/requests`, `GET /api/requests/mine`, `POST /api/requests/:id/cancel` | User |
+| `GET /api/vision/status` | Any signed-in user |
+| `POST /api/vision/video` (multipart: `video`, `transcript`) | Donor |
+| `GET /api/vision/media/*` | Public (random 128-bit ids; frames and video for `<img>`/`<video>`) |
 | `GET /api/tasks/mine`, `POST /api/tasks/:id/complete` | Volunteer (admin can also complete) |
 | `GET /api/routes`, `GET /api/activity` | Admin, volunteer |
 | `GET /api/furniture`, `POST /api/furniture/:id/review`, `GET /api/donors/:id/furniture` | Admin |
@@ -105,7 +114,7 @@ Rule-based screening (excluded categories, damage keywords, missing photo) still
 
 ## Not yet implemented
 
-- Vision model (see above), Google Forms ingestion, road routing/OR-Tools, multilingual messaging, password reset/change, email notifications.
+- Photo-only AI review (video intake is implemented), deploying the vision service with `deploy.sh`, Google Forms ingestion, road routing/OR-Tools, multilingual messaging, password reset/change, email notifications.
 - Route planning uses straight-line distances between neighborhood centers, not street addresses.
 
 ## Collaboration

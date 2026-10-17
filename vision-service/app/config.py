@@ -1,4 +1,4 @@
-"""Runtime settings, read from environment variables (see backend/.env.example)."""
+"""Runtime settings, read from environment variables (see vision-service/.env.example)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
+SERVICE_DIR = Path(__file__).resolve().parent.parent
 
 
 def _load_dotenv(path: Path) -> None:
@@ -21,7 +21,7 @@ def _load_dotenv(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-_load_dotenv(BACKEND_DIR / ".env")
+_load_dotenv(SERVICE_DIR / ".env")
 
 
 def _env(name: str, default: str = "") -> str:
@@ -68,17 +68,13 @@ class Settings:
     max_video_seconds: int = field(default_factory=lambda: int(_env("MAX_VIDEO_SECONDS", "120")))
     max_upload_mb: int = field(default_factory=lambda: int(_env("MAX_UPLOAD_MB", "200")))
     rules_file: Path = field(
-        default_factory=lambda: Path(_env("RULES_FILE", str(BACKEND_DIR / "rules" / "house2home.json")))
+        default_factory=lambda: Path(_env("RULES_FILE", str(SERVICE_DIR / "rules" / "house2home.json")))
     )
-    data_dir: Path = field(default_factory=lambda: Path(_env("DATA_DIR", str(BACKEND_DIR / "data"))))
+    data_dir: Path = field(default_factory=lambda: Path(_env("DATA_DIR", str(SERVICE_DIR / "data"))))
 
     @property
     def media_dir(self) -> Path:
         return self.data_dir / "media"
-
-    @property
-    def db_path(self) -> Path:
-        return self.data_dir / "inventory.sqlite3"
 
 
 settings = Settings()

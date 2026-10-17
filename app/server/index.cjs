@@ -273,12 +273,19 @@ app.post('/api/furniture', requireRole('donor'), h(async (req, res) => {
     if (!categories.includes(d.category) || !str(d.name, 100) || !str(d.location, 120)) return fail(res, 400, 'Name, supported category and pickup area are required');
     if (d.photo && !/^data:image\/(png|jpeg|webp);base64,/.test(d.photo)) return fail(res, 400, 'Photo must be a JPEG, PNG or WebP image');
     const location = str(d.location, 120), c = coordsFor(location), notes = str(d.notes, 400);
-    const flags = screening({category: d.category, notes, photo: d.photo}).flags;
+    // A video-intake item: the AI verdict is re-read from the vision service, never taken from the browser.
+    let visionResult = null, photo = d.photo || null;
+    if (d.vision) {
+        const v = await vision.resultForItem(d.vision.intakeId, d.vision.itemIndex, req.user.id);
+        visionResult = v.stored;
+        photo = photo || v.photo;
+    }
+    const flags = screening({category: d.category, notes, photo}).flags;
     const {insertId} = await db.query(`INSERT INTO furniture (donor_id, name, category, dimensions, weight_kg,
-                                                              pickup_area, lat, lng, notes, photo, screening_flags)
-                                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [req.user.id, str(d.name, 100), d.category, str(d.dimensions, 100) || 'Not supplied', Math.min(9999, Math.max(0, Number(d.weight) || 0)), location, c.lat, c.lng, notes, d.photo || null, JSON.stringify(flags)]);
-    await log(req.user.id, `Donation submitted: ${str(d.name, 100)} by ${req.user.name}`);
+                                                              pickup_area, lat, lng, notes, photo, screening_flags, vision_result)
+                                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [req.user.id, str(d.name, 100), d.category, str(d.dimensions, 100) || 'Not supplied', Math.min(9999, Math.max(0, Number(d.weight) || 0)), location, c.lat, c.lng, notes, photo, JSON.stringify(flags), visionResult && JSON.stringify(visionResult)]);
+    await log(req.user.id, `Donation submitted${visionResult ? ' via video' : ''}: ${str(d.name, 100)} by ${req.user.name}`);
     res.status(201).json(toFurniture(await db.one(FURNITURE_SQL + ' WHERE f.id = ?', [insertId])));
 }));
 app.get('/api/furniture/mine', requireRole('donor'), h(async (req, res) => {
@@ -546,11 +553,11 @@ app.post('/api/admin/reset', requireRole('admin'), h(async (req, res) => {
 
 // ---------- Screening ----------
 app.post('/api/screen', requireRole('donor', 'admin'), (req, res) => res.json(screening(req.body || {})));
-// Vision model: not implemented yet (see server/vision.cjs).
-app.post('/api/vision', requireRole('donor', 'admin'), h(async (req, res) => {
-    if (!vision.isConfigured()) return fail(res, 501, 'Vision model not implemented yet');
-    res.json(await vision.analyzePhoto(req.body || {}));
-}));
+// Video intake (see server/vision.cjs and ../vision-service).
+app.get('/api/vision/status', requireRole(), h(async (req, res) => res.json(await vision.status())));
+app.post('/api/vision/video', requireRole('donor'), h(async (req, res) => res.json(await vision.analyzeVideo(req, req.user.id))));
+// Unauthenticated so <img>/<video> tags work; paths contain an unguessable 128-bit id.
+app.get('/api/vision/media/*', (req, res) => vision.pipeMedia(req.params[0], req, res));
 
 app.use('/api', (req, res) => fail(res, 404, 'Not found'));
 
@@ -564,6 +571,7 @@ app.use((err, req, res, next) => {
     console.error(err);
     if (res.headersSent) return next(err);
     if (err.type === 'entity.too.large') return fail(res, 413, 'Upload is too large');
+    if (err instanceof vision.VisionError) return fail(res, err.status, err.message);
     if (err.code === 'ECONNREFUSED' || err.code === 'ER_ACCESS_DENIED_ERROR' || err.code === 'ER_BAD_DB_ERROR') return fail(res, 503, 'Database unavailable: check the MYSQL_* settings in .env');
     fail(res, 500, 'Server error');
 });

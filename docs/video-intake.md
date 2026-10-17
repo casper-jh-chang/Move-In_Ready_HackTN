@@ -1,6 +1,8 @@
 # 视频预审入库：设计与使用说明
 
-捐赠者用手机绕着家具拍一段 30 到 60 秒的短视频，边拍边口头介绍。系统从画面和语音里提取品类、成色、尺寸、瑕疵和取件信息，按 House2Home 的“收与不收”规则给出 **接收 / 拒收（附原因和替代去处）/ 转人工**，并直接写进库存。志愿者在后台确认或改判。
+捐赠者用手机绕着家具拍一段 30 到 60 秒的短视频，边拍边口头介绍。系统从画面和语音里提取品类、成色、尺寸、瑕疵和取件信息，按 House2Home 的“收与不收”规则给出 **接收 / 拒收（附原因和替代去处）/ 转人工**。识别出的每件家具直接作为待审核捐赠写进网站的 MySQL 库存，管理员在“Donation review”里看视频、确认或改判。
+
+网页入口：捐赠者登录后，在 **My donations** 页点 **Donate with a video**，或者在普通捐赠表单里点 **AI video intake**。
 
 ## 流程
 
@@ -25,16 +27,24 @@ ffprobe 读时长 → 按时间等分成 8 段，每段挑最清晰的一帧（�
 规则引擎（确定性代码，不用 AI）逐条判定，并记录触发了哪条规则
         │
         ▼
-在模型给出的时间点重新截帧（主图 + 每个瑕疵一张图）→ 写入 SQLite 库存
-  接收 → pledged（已认捐，可参与配对）
-  转人工 → needs_review
-  拒收 → declined（告诉捐赠者原因和可以去哪里捐）
-所有记录都标注“AI 判定、未经志愿者确认”，直到志愿者在后台处理。
+在模型给出的时间点重新截帧（主图 + 每个瑕疵一张图），结果存成 result.json
+        │
+        ▼
+网页上每件家具一张卡片：名称、品类已预填，AI 判定和原因、瑕疵截图（点一下跳到视频对应秒数）
+捐赠者确认或修改，取消勾选不想捐的，选取件区域，提交
+        │
+        ▼
+Express（app/server/vision.cjs）重新向视频服务读取这次的识别结果（并核对是不是这位捐赠者的），
+写入 MySQL furniture 表：status = pending，AI 结果存在 vision_result，主图存在 photo
+        │
+        ▼
+管理员在 Donation review 看到 AI 判定；点 Approve / Reject 可以看视频、规则原因和瑕疵截图，
+拒收理由会预填规则给出的原因和建议去处。最终决定始终由管理员做。
 ```
 
 ## 为什么这样设计
 
-- **AI 只描述，不做决定。** 收不收由 `backend/rules/house2home.json` 里的规则决定，每条拒收都能指到具体规则编号。换一家家具银行，只要换一份规则文件。
+- **AI 只描述，不做决定。** 收不收由 `vision-service/rules/house2home.json` 里的规则决定，每条拒收都能指到具体规则编号。换一家家具银行，只要换一份规则文件。
 - **画面和语音互相印证。** 瑕疵记录证据来源；捐赠者说“没有污渍”但画面里有，会进入“矛盾”列表并转人工。
 - **证据不足就转人工，不硬判。** 置信度低于 0.6、拍到的面少于 3 个、无法确认是不是沙发床，都会转人工，并提示捐赠者补拍什么。
 - **每个结论都能回看。** 瑕疵带时间点，后台点一下就跳到视频对应位置。
@@ -58,24 +68,27 @@ ffprobe 读时长 → 按时间等分成 8 段，每段挑最清晰的一帧（�
 
 ## 运行
 
-需要 Python 3.11+、Node 18+、ffmpeg。
+需要 Node 16.20+、MySQL 8、Python 3.11+、ffmpeg。
 
 ```bash
-# 后端
-cd backend
+# 1. 视频识别服务
+cd vision-service
 pip install -r requirements.txt
-cp .env.example .env          # 默认 VISION_PROVIDER=mock，不需要任何云账号
-uvicorn app.main:app --reload --port 8000
+cp .env.example .env          # 默认 VISION_PROVIDER=mock，不需要任何模型
 
-# 前端（开发模式，另开一个终端）
-cd frontend
+# 2. 网站（MySQL 的建库步骤见 app/README.md）
+cd ../app
 npm install
-npm run dev                   # http://localhost:5173 ，/api 自动代理到 8000
+cp .env.example .env          # 填 MYSQL_*；VISION_SERVICE_URL 默认 http://127.0.0.1:8000
+npm run db:init
+npm run dev:video             # 同时启动视频服务 :8000、API :3001、网页 :5173
 ```
 
-也可以 `npm run build` 后只启动后端，直接访问 http://localhost:8000 。手机上用摄像头需要 HTTPS（或 localhost），演示时可以用 ngrok 之类的隧道。
+用 donor1@demo.org / demo1234 登录捐赠者，admin@demo.org / demo1234 登录管理员。视频服务没启动时，网站其他功能照常可用，视频弹窗会提示怎么启动。
 
-测试：`cd backend && python -m pytest -q`
+手机上用摄像头需要 HTTPS（或 localhost），演示时可以用 ngrok 之类的隧道。
+
+测试：`cd vision-service && python -m pytest -q`
 
 ### 不接云服务演示（mock 模式）
 
@@ -98,11 +111,11 @@ mock 模式按关键词返回预设结果，关键词可以来自口述字幕，
 ollama pull qwen2.5vl:7b        # 约 6 GB；电脑慢可以用 qwen2.5vl:3b
 
 # 2. 装本地语音转写
-cd backend
+cd vision-service
 pip install -r requirements-local.txt
 ```
 
-`backend/.env`：
+`vision-service/.env`：
 
 ```
 VISION_PROVIDER=ollama
@@ -111,7 +124,7 @@ TRANSCRIBE_PROVIDER=local
 WHISPER_MODEL_SIZE=small
 ```
 
-然后照常启动后端和前端。
+然后照常 `npm run dev:video`。
 
 - 本地模型只看图，所以固定走 frames 模式：8 张关键帧加文字稿。文字稿优先用浏览器的实时字幕；上传的视频没有字幕时，用 Whisper 从音轨转写。Whisper 模型第一次用时会自动下载（`small` 约 460 MB）。
 - 速度取决于电脑：有独立显卡或 Apple Silicon 时一段视频大约几十秒，纯 CPU 可能要几分钟。太慢可以把 `NUM_KEYFRAMES` 调到 4 到 6，把 `OLLAMA_IMAGE_PX` 调到 448，或者设 `FRAMES_AS_SHEET=true`，把所有帧拼成一张图只发一次。
@@ -120,7 +133,7 @@ WHISPER_MODEL_SIZE=small
 
 ### 接 OCI Generative AI
 
-在 `backend/.env` 里：
+在 `vision-service/.env` 里：
 
 ```
 VISION_PROVIDER=oci
@@ -137,38 +150,46 @@ OCI_MODEL_ID=google.gemini-2.5-flash
 
 > 还没有用真实 OCI 账号跑过。请求结构已经按 OCI Python SDK 的格式核对过，第一次接入时请注意：所选区域是否提供该模型、内联视频的大小限制、模型是否稳定输出 JSON（代码会剥掉 ```json 代码块，解析失败自动重试一次）。
 
-## API
+## 接口
+
+网站（Express，`app/server/index.cjs`）：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/intake` | multipart：`video`（必填）、`transcript`、`donor_name`、`donor_zip`、`donor_contact`。同步返回整条记录和所有物品 |
-| GET | `/api/intake/{id}` | 一次上传的完整结果 |
-| GET | `/api/inventory?status=` | 库存列表 |
-| PATCH | `/api/inventory/{id}` | 志愿者改状态、备注、标题；改状态即视为已人工确认 |
-| GET | `/api/stats` | 各状态数量、估算免于填埋的重量 |
-| GET | `/api/config` | 当前使用的模型和模式 |
+| GET | `/api/vision/status` | 视频服务是否在线、用的什么模型、是否缺 ffmpeg |
+| POST | `/api/vision/video` | 仅捐赠者。multipart：`video`、`transcript`。返回每件家具的 AI 结果和预填字段 |
+| POST | `/api/furniture` | 原有的提交捐赠接口，多了可选的 `vision: {intakeId, itemIndex}` |
+| GET | `/api/vision/media/*` | 视频和截图，供 `<img>`/`<video>` 使用；路径含随机 128 位 id |
+
+视频服务（FastAPI，只给 Express 调用，不要直接暴露到公网）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/analyze` | multipart：`video`、`transcript` |
+| GET | `/intake/{id}` | 读取已保存的识别结果 |
+| GET | `/health` | 模型、模式、缺少的工具 |
+| GET | `/media/...` | 播放用视频、关键帧、瑕疵截图 |
 
 ## 代码位置
 
 ```
-backend/app/video.py      ffmpeg：探测、挑清晰帧、截帧、抽音频、压缩、九宫格
-backend/app/prompts.py    给模型的提示词（只提取事实，附 JSON Schema）
-backend/app/providers.py  OCI / Ollama 本地 / OpenAI 兼容 / mock 四种模型后端，本地 Whisper，JSON 解析
-backend/app/schema.py     模型输出和判定结果的数据结构
-backend/app/rules.py      规则引擎
-backend/rules/house2home.json  规则、替代去处、各品类估重
-backend/app/pipeline.py   串起整个流程并写库
-backend/app/db.py         SQLite 库存
-backend/app/main.py       HTTP 接口
-frontend/src/Capture.tsx  录制页：摄像头、拍摄引导、实时字幕、上传
-frontend/src/IntakeView.tsx  结果页：判定、规则、瑕疵截图、拍摄覆盖面
-frontend/src/Inventory.tsx   志愿者后台：筛选、统计、确认或改判
+app/src/pages/VideoIntake.tsx  录制/上传、拍摄引导、实时字幕、识别结果、提交；管理员看到的 AI 面板
+app/src/pages/Donor.tsx        两个入口：My donations 页的按钮、捐赠表单里的 AI video intake
+app/src/pages/Admin.tsx        审核卡片和 Approve/Reject 弹窗里显示 AI 结果
+app/server/vision.cjs          转发视频、品类映射、预填字段、校验归属、存 vision_result
+vision-service/app/video.py      ffmpeg：探测、挑清晰帧、截帧、抽音频、压缩、九宫格
+vision-service/app/prompts.py    给模型的提示词（只提取事实，附 JSON Schema）
+vision-service/app/providers.py  OCI / Ollama 本地 / OpenAI 兼容 / mock 四种模型后端，本地 Whisper，JSON 解析
+vision-service/app/schema.py     模型输出和判定结果的数据结构
+vision-service/app/rules.py      规则引擎
+vision-service/rules/house2home.json  规则、替代去处、各品类估重
+vision-service/app/pipeline.py   串起整个流程，结果存成 result.json
+vision-service/app/main.py       HTTP 接口
 ```
 
 ## 后续可以做
 
 - 异步处理加进度推送（现在是同步请求，真实模型大约要 10 到 40 秒）。
-- 视频和截图存到 OCI Object Storage，库存换成 Autonomous DB。
+- 视频和截图存到 OCI Object Storage；`deploy.sh` 目前只部署网站，视频服务还要单独部署。
 - 让 AI 估的尺寸参考画面里的已知物体（门框、A4 纸）提高精度。
-- 和需求匹配模块对接：pledged 状态的物品直接参与家具包配对。
 - 用 20 到 30 段真实风格的测试视频做准确率评估（品类、沙发床、污渍的召回率）。

@@ -32,7 +32,7 @@ export type Furniture = {
     status: 'pending' | 'approved' | 'rejected',
     inventoryStatus: 'pledged' | 'in_stock' | 'delivered' | 'rejected',
     screening: { flags: string[] },
-    visionResult: unknown,
+    visionResult: VisionResult | null,
     reviewReason?: string | null,
     reviewedAt?: string | null,
     createdAt: string,
@@ -105,3 +105,75 @@ export type Impact = {
 };
 export type Activity = { id: number, text: string, actor: string | null, date: string };
 export type Meta = { categories: string[], areas: string[] };
+
+// ---------- Video intake (server/vision.cjs, ../vision-service) ----------
+export type AiOutcome = 'accept' | 'review' | 'decline';
+export type RuleHit = { rule_id: string, outcome: AiOutcome, reason: string, alternative: string };
+export type Defect = {
+    type: string,
+    severity: 'minor' | 'moderate' | 'severe',
+    location: string,
+    evidence: 'visual' | 'spoken' | 'both',
+    timestamp_s: number | null,
+    note: string
+};
+export type DefectFrame = { defectIndex: number, t: number, url: string };
+
+// Stored in furniture.vision_result for items donated through a video.
+export type VisionResult = {
+    source: 'video',
+    intakeId: string,
+    itemIndex: number,
+    provider: string,
+    analyzedAt: string,
+    outcome: AiOutcome,
+    hits: RuleHit[],
+    title: string,
+    category: string,
+    conditionGrade: string,
+    conditionScore: number,
+    isSleeper: boolean | null,
+    defects: Defect[],
+    viewsCovered: string[],
+    confidence: number,
+    evidence: string,
+    videoUrl: string,
+    photoUrl: string,
+    defectFrames: DefectFrame[],
+    summary: string,
+    inconsistencies: string[],
+    transcript: string
+};
+
+export type VideoAnalysis = {
+    id: string,
+    provider: string,
+    mode: string,
+    duration: number,
+    transcript: string,
+    videoUrl: string,
+    frames: { url: string, t: number }[],
+    summary: string,
+    inconsistencies: string[],
+    retakeSuggestions: string[],
+    items: {
+        index: number,
+        item: {
+            title: string, category: string, quantity: number, condition_grade: string, condition_score: number,
+            defects: Defect[], views_covered: string[], confidence: number, evidence: string, is_sleeper: boolean | null
+        },
+        decision: { outcome: AiOutcome, hits: RuleHit[], est_weight_lbs: number },
+        photoUrl: string,
+        defectFrames: DefectFrame[],
+        suggested: { name: string, category: string, dimensions: string, weight: number, notes: string, photo: string }
+    }[]
+};
+
+export type VisionStatus = {
+    available: boolean,
+    error?: string,
+    provider?: string,
+    model?: string,
+    maxVideoSeconds?: number,
+    missingTools?: string[]
+};

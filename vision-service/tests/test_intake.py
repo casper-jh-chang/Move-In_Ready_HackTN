@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 
 from app import rules as rules_mod
-from app.config import BACKEND_DIR
+from app.config import SERVICE_DIR
 from app.providers import ModelOutputError, parse_analysis
 from app.schema import ItemAnalysis, VideoAnalysis
 
-RULES = rules_mod.load_rules(BACKEND_DIR / "rules" / "house2home.json")
+RULES = rules_mod.load_rules(SERVICE_DIR / "rules" / "house2home.json")
 GOOD_VIEWS = ["front", "back", "left", "right", "cushions"]
 
 
@@ -98,34 +98,40 @@ def client(tmp_path, monkeypatch):
     return TestClient(app.main.app)
 
 
-def test_end_to_end_mock_intake(client, tmp_path):
+def test_end_to_end_mock_analysis(client, tmp_path):
     vid = tmp_path / "clip.mp4"
     _make_video(vid)
     with vid.open("rb") as fh:
-        r = client.post("/api/intake", files={"video": ("sleeper_sofa.mp4", fh, "video/mp4")}, data={"donor_zip": "37206"})
+        r = client.post("/analyze", files={"video": ("sleeper_sofa.mp4", fh, "video/mp4")})
     assert r.status_code == 200, r.text
-    intake = r.json()
-    assert len(intake["frames"]) == 8 and intake["video_url"].endswith("playback.mp4")
-    [item] = intake["items"]
-    assert item["ai_outcome"] == "decline" and item["status"] == "declined" and not item["human_verified"]
-    assert client.get(item["thumb_url"]).status_code == 200
+    res = r.json()
+    assert len(res["id"]) == 32 and len(res["frames"]) == 8 and res["videoUrl"].endswith("playback.mp4")
+    [item] = res["items"]
+    assert item["decision"]["outcome"] == "decline" and item["item"]["category"] == "sleeper_sofa"
+    assert item["photo"].startswith("data:image/jpeg;base64,")
+    assert client.get(item["photoUrl"]).status_code == 200
+
+    # The Node app re-reads the saved result by id when the donor submits.
+    assert client.get(f"/intake/{res['id']}").json()["items"][0]["decision"] == item["decision"]
+    assert client.get("/intake/../../etc").status_code == 404
+    assert client.get("/intake/" + "0" * 32).status_code == 404
 
     with vid.open("rb") as fh:
-        r = client.post("/api/intake", files={"video": ("clip.mp4", fh, "video/mp4")},
+        r = client.post("/analyze", files={"video": ("clip.mp4", fh, "video/mp4")},
                         data={"transcript": "Dining table and four chairs, no damage"})
-    assert [i["category"] for i in r.json()["items"]] == ["dining_table", "dining_chair"]
-
-    inv = client.get("/api/inventory").json()
-    assert len(inv) == 3
-    r = client.patch(f"/api/inventory/{item['id']}", json={"status": "needs_review", "reviewer_note": "check in person"})
-    assert r.json()["status"] == "needs_review" and r.json()["human_verified"]
-    stats = client.get("/api/stats").json()
-    assert stats["intakes"] == 2 and stats["est_lbs_diverted"] == 60 + 4 * 12
+    items = r.json()["items"]
+    assert [i["item"]["category"] for i in items] == ["dining_table", "dining_chair"]
+    assert [i["decision"]["est_weight_lbs"] for i in items] == [60, 48]
 
 
 def test_rejects_non_video(client):
-    r = client.post("/api/intake", files={"video": ("notes.txt", b"hello", "text/plain")})
+    r = client.post("/analyze", files={"video": ("notes.txt", b"hello", "text/plain")})
     assert r.status_code == 400
+
+
+def test_health_reports_provider(client):
+    h = client.get("/health").json()
+    assert h["provider"] == "mock" and h["missingTools"] == []
 
 
 def test_ollama_provider_request_and_schema_fallback(tmp_path, monkeypatch):

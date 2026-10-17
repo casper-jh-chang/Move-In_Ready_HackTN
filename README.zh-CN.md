@@ -97,16 +97,17 @@
 
 ## 本地运行
 
-需要 Python 3.11+、Node 18+ 和 ffmpeg。默认的 `mock` 模式不需要任何云账号。
+需要 Node 16.20+、MySQL 8、Python 3.11+ 和 ffmpeg。默认的 `mock` 模式不需要任何云账号。
+
+网站在 `app/` 目录（React + Express + MySQL，安装步骤见 [app/README.md](app/README.md)）。AI 视频识别是 `vision-service/` 里一个单独的 Python 服务：
 
 ```bash
-cd backend && pip install -r requirements.txt && cp .env.example .env
-uvicorn app.main:app --reload --port 8000
-
-cd frontend && npm install && npm run dev   # http://localhost:5173
+cd vision-service && pip install -r requirements.txt && cp .env.example .env
+cd ../app && npm install && cp .env.example .env && npm run db:init
+npm run dev:video     # 同时启动视频服务 :8000、API :3001、网页 :5173
 ```
 
-测试：`cd backend && python -m pytest -q`。接入 OCI、规则表和接口说明见 [docs/video-intake.md](docs/video-intake.md)。
+测试：`cd vision-service && python -m pytest -q`。本地模型、接入 OCI 和规则表见 [docs/video-intake.md](docs/video-intake.md)。
 
 ---
 
@@ -129,9 +130,10 @@ docs/
   house2home-analysis.md    House2Home 流程拆解
   h2h-outreach-email.md     外联邮件草稿
   video-intake.md           视频预审：设计、规则、运行说明
-backend/
-  app/                      FastAPI：ffmpeg 抽帧、OCI GenAI 分析、规则引擎、SQLite 库存
+app/                        网站：React 前端、Express API、MySQL（捐赠者、管理员、志愿者、受助者）
+  src/pages/VideoIntake.tsx 录制或上传环绕视频、查看 AI 结果、提交
+  server/vision.cjs         把视频转给视频服务，保存识别结果
+vision-service/
+  app/                      FastAPI：ffmpeg 抽帧、多模态模型（mock/Ollama/OCI）、规则引擎
   rules/house2home.json     收与不收规则、替代去处、估重
-frontend/
-  src/                      React：带引导和实时字幕的录制页、结果页、志愿者后台
 ```

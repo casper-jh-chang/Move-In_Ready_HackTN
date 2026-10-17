@@ -3,6 +3,7 @@ import {AlertTriangle, ArrowRight, Check, Plus, RotateCcw, Search, ShieldCheck, 
 import {request, setToken, useAction, useApp, useLoad} from '../api';
 import {Badge, Empty, FurnitureCard, Modal, PageHeader, shortDate} from '../ui';
 import type {Furniture, FurnitureRequest, Role, Task, User} from '../types';
+import {hasVideo, VisionPanel} from './VideoIntake';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -36,7 +37,11 @@ function AssignModal({title, payload, onClose, onDone}: {
 }
 
 function ReviewModal({item, status, onClose, onDone}: { item: Furniture, status: 'approved' | 'rejected', onClose: () => void, onDone: () => unknown }) {
-    const [form, setForm] = useState({condition: status === 'approved' ? 'Good' : item.condition, reason: ''});
+    // Pre-fill a rejection with the rule reasons the AI intake cited; the admin can rewrite it.
+    const aiReason = status === 'rejected' && hasVideo(item.visionResult)
+        ? item.visionResult.hits.filter(h => h.outcome === 'decline').map(h => h.reason + (h.alternative ? ' Try instead: ' + h.alternative : '')).join(' ').slice(0, 300)
+        : '';
+    const [form, setForm] = useState({condition: status === 'approved' ? 'Good' : item.condition, reason: aiReason});
     const {run, busy} = useAction();
     const submit = async () => {
         if (await run(`/furniture/${item.id}/review`, 'POST', {status, ...form}, `${item.name} ${status}`, onDone)) onClose();
@@ -44,6 +49,7 @@ function ReviewModal({item, status, onClose, onDone}: { item: Furniture, status:
     return <Modal eyebrow={status === 'approved' ? 'APPROVE DONATION' : 'REJECT DONATION'} title={item.name} onClose={onClose} onSubmit={submit}
                   description={`Donated by ${item.donorName} · ${item.category} · ${item.location}`}>
         {!!item.screening.flags.length && <div className="review-result"><strong>Rule flags</strong>{item.screening.flags.map(f => <p key={f}>• {f}</p>)}</div>}
+        {hasVideo(item.visionResult) && <VisionPanel v={item.visionResult}/>}
         <div className="form-grid">
             {status === 'approved' && <label>Verified condition<select value={form.condition} onChange={e => setForm({...form, condition: e.target.value})}>
                 {['Like new', 'Good', 'Fair'].map(c => <option key={c}>{c}</option>)}</select></label>}
@@ -69,7 +75,7 @@ export function DonationReview() {
         <PageHeader eyebrow="DONATION REVIEW" title="Review incoming donations"
                     description="Screen offers against acceptance rules, approve or reject them, then assign a volunteer to pick up approved items."/>
         <div className="notice"><ShieldCheck size={20}/>
-            <div><strong>Humans decide.</strong> Rule flags help you spot issues, but only an admin can approve a donation. The AI photo review is not connected yet.</div>
+            <div><strong>Humans decide.</strong> Rule flags and the AI video intake help you spot issues, but only an admin can approve a donation. Open Approve or Reject to watch the donor's video.</div>
         </div>
         <div className="filter-row">
             <div className="segmented">{['pending', 'approved', 'rejected', 'all'].map(s => <button key={s} className={filter === s ? 'active' : ''} onClick={() => setFilter(s)}>
@@ -79,6 +85,7 @@ export function DonationReview() {
         {data && !items.length && <Empty>Nothing here.</Empty>}
         <div className="donation-grid">{items.map(f => <FurnitureCard key={f.id} item={f}
                                                                     footer={<><span>Donor: <b>{f.donorName}</b></span><Badge value={f.inventoryStatus}/></>}>
+            {hasVideo(f.visionResult) && f.status === 'pending' && <VisionPanel v={f.visionResult} compact/>}
             {!!f.screening.flags.length && f.status === 'pending' && <div className="flags">{f.screening.flags.map(x => <span key={x}><AlertTriangle size={12}/>{x}</span>)}</div>}
             {f.reviewReason && <p className="review-note">Note: {f.reviewReason}</p>}
             {f.status === 'pending' && <div className="item-buttons">
