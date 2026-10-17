@@ -11,8 +11,12 @@ CREATE TABLE IF NOT EXISTS users (
     role          ENUM ('admin', 'volunteer', 'donor', 'user') NOT NULL,
     phone         VARCHAR(40)  NULL,
     area          VARCHAR(120) NULL,
+    -- Street address (optional). When it geocodes, lat/lng are exact and geo_precise = 1;
+    -- otherwise lat/lng are the area center.
+    address       VARCHAR(200) NULL,
     lat           DECIMAL(9, 6) NULL,
     lng           DECIMAL(9, 6) NULL,
+    geo_precise   TINYINT(1)   NOT NULL DEFAULT 0,
     active        TINYINT(1)   NOT NULL DEFAULT 1,
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_users_role (role)
@@ -36,8 +40,10 @@ CREATE TABLE IF NOT EXISTS furniture (
     dimensions       VARCHAR(100) NOT NULL DEFAULT 'Not supplied',
     weight_kg        DECIMAL(6, 1) NOT NULL DEFAULT 0,
     pickup_area      VARCHAR(120) NOT NULL,
+    pickup_address   VARCHAR(200) NULL,
     lat              DECIMAL(9, 6) NOT NULL,
     lng              DECIMAL(9, 6) NOT NULL,
+    geo_precise      TINYINT(1)   NOT NULL DEFAULT 0,
     notes            VARCHAR(400) NOT NULL DEFAULT '',
     photo            MEDIUMTEXT   NULL,
     -- Review state set by an admin
@@ -45,7 +51,7 @@ CREATE TABLE IF NOT EXISTS furniture (
     -- Physical lifecycle once approved
     inventory_status ENUM ('pledged', 'in_stock', 'delivered', 'rejected') NOT NULL DEFAULT 'pledged',
     screening_flags  TEXT         NULL,
-    -- Reserved for the vision model (not implemented yet)
+    -- OCI photo scan (JSON): {status: 'scanning' | 'done' | 'error', ...}; see server/vision.cjs
     vision_result    TEXT         NULL,
     review_reason    VARCHAR(300) NULL,
     reviewed_by      INT          NULL,

@@ -11,7 +11,9 @@ const {
     requireRole
 } = require('./auth.cjs');
 const {categories, areas, depot, coordsFor, screening} = require('./meta.cjs');
-const vision = require('./vision.cjs');
+const vision = require('./vision.cjs'); // video intake (../vision-service)
+const photoScan = require('./photo-scan.cjs'); // single-photo scan on OCI
+const geo = require('./geo.cjs');
 
 const app = express();
 app.use(cors());
@@ -34,6 +36,8 @@ const publicUser = (u) => u && ({
     role: u.role,
     phone: u.phone,
     area: u.area,
+    address: u.address,
+    geoPrecise: !!u.geo_precise,
     active: u.active === undefined ? true : !!u.active,
     createdAt: u.created_at
 });
@@ -44,18 +48,18 @@ const parseJson = (s, fallback) => {
         return fallback
     }
 };
+// withDonor = false (recipients): hide the donor's identity, street address and exact location.
 const toFurniture = (r, {withDonor = true} = {}) => ({
     id: r.id,
     donorId: r.donor_id,
-    ...(withDonor ? {donorName: r.donor_name, donorEmail: r.donor_email} : {}),
+    ...(withDonor ? {donorName: r.donor_name, donorEmail: r.donor_email, address: r.pickup_address} : {}),
     name: r.name,
     category: r.category,
     condition: r.item_condition,
     dimensions: r.dimensions,
     weight: r.weight_kg,
     location: r.pickup_area,
-    lat: r.lat,
-    lng: r.lng,
+    ...(withDonor ? {lat: r.lat, lng: r.lng, geoPrecise: !!r.geo_precise} : coordsFor(r.pickup_area)),
     notes: r.notes,
     photo: r.photo,
     status: r.status,
@@ -103,6 +107,8 @@ const toTask = (r) => {
         contactName: pickup ? r.donor_name : r.recipient_name,
         contactPhone: pickup ? r.donor_phone : r.recipient_phone,
         area: pickup ? r.pickup_area : r.recipient_area,
+        address: pickup ? r.pickup_address : r.recipient_address,
+        geoPrecise: !!(pickup ? r.f_precise : r.r_precise),
         lat: pickup ? r.f_lat : r.r_lat,
         lng: pickup ? r.f_lng : r.r_lng
     };
@@ -131,15 +137,19 @@ const TASK_SQL = `SELECT t.*,
                          f.category,
                          f.weight_kg,
                          f.pickup_area,
+                         f.pickup_address,
                          f.lat    AS f_lat,
                          f.lng    AS f_lng,
+                         f.geo_precise AS f_precise,
                          d.name   AS donor_name,
                          d.phone  AS donor_phone,
                          ru.name  AS recipient_name,
                          ru.phone AS recipient_phone,
                          ru.area  AS recipient_area,
+                         ru.address AS recipient_address,
                          ru.lat   AS r_lat,
-                         ru.lng   AS r_lng
+                         ru.lng   AS r_lng,
+                         ru.geo_precise AS r_precise
                   FROM tasks t
                            JOIN users v ON v.id = t.volunteer_id
                            JOIN furniture f ON f.id = t.furniture_id
@@ -150,9 +160,9 @@ const TASK_SQL = `SELECT t.*,
 // ---------- Public ----------
 app.get('/api/health', h(async (req, res) => {
     await db.query('SELECT 1');
-    res.json({ok: true, storage: 'MySQL', visionConfigured: vision.isConfigured()});
+    res.json({ok: true, storage: 'MySQL', visionConfigured: photoScan.isConfigured(), visionModel: photoScan.isConfigured() ? photoScan.MODEL : null, routing: geo.OSRM_URL});
 }));
-app.get('/api/meta', (req, res) => res.json({categories, areas: Object.keys(areas)}));
+app.get('/api/meta', (req, res) => res.json({categories, areas: Object.keys(areas), visionConfigured: photoScan.isConfigured()}));
 
 // ---------- Auth ----------
 async function startSession(res, user, status = 200) {
@@ -166,7 +176,7 @@ function validateAccount(b) {
     if (!name) return {error: 'Name is required'};
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return {error: 'A valid email is required'};
     if (password.length < 8) return {error: 'Password must be at least 8 characters'};
-    return {name, email, password, area: str(b.area, 120) || null, phone: str(b.phone, 40) || null};
+    return {name, email, password, area: str(b.area, 120) || null, address: str(b.address, 200) || null, phone: str(b.phone, 40) || null};
 }
 
 async function createUser(b, role) {
@@ -176,9 +186,9 @@ async function createUser(b, role) {
         error: 'An account with this email already exists',
         status: 409
     };
-    const c = coordsFor(v.area);
-    const {insertId} = await db.query('INSERT INTO users (name, email, password_hash, role, phone, area, lat, lng) VALUES (?,?,?,?,?,?,?,?)',
-        [v.name, v.email, await hashPassword(v.password), role, v.phone, v.area, c.lat, c.lng]);
+    const c = await geo.locate(v.address, v.area);
+    const {insertId} = await db.query('INSERT INTO users (name, email, password_hash, role, phone, area, address, lat, lng, geo_precise) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        [v.name, v.email, await hashPassword(v.password), role, v.phone, v.area, v.address, c.lat, c.lng, c.precise ? 1 : 0]);
     return {user: await db.one('SELECT * FROM users WHERE id = ?', [insertId])};
 }
 
@@ -204,8 +214,9 @@ app.post('/api/auth/logout', requireRole(), h(async (req, res) => {
 app.get('/api/auth/me', requireRole(), (req, res) => res.json(publicUser(req.user)));
 app.patch('/api/auth/me', requireRole(), h(async (req, res) => {
     const b = req.body || {}, name = str(b.name, 80) || req.user.name, area = str(b.area, 120) || null,
-        c = coordsFor(area);
-    await db.query('UPDATE users SET name = ?, phone = ?, area = ?, lat = ?, lng = ? WHERE id = ?', [name, str(b.phone, 40) || null, area, c.lat, c.lng, req.user.id]);
+        address = str(b.address, 200) || null, c = await geo.locate(address, area);
+    await db.query('UPDATE users SET name = ?, phone = ?, area = ?, address = ?, lat = ?, lng = ?, geo_precise = ? WHERE id = ?',
+        [name, str(b.phone, 40) || null, area, address, c.lat, c.lng, c.precise ? 1 : 0, req.user.id]);
     res.json(publicUser(await db.one('SELECT * FROM users WHERE id = ?', [req.user.id])));
 }));
 
@@ -272,13 +283,27 @@ app.post('/api/furniture', requireRole('donor'), h(async (req, res) => {
     const d = req.body || {};
     if (!categories.includes(d.category) || !str(d.name, 100) || !str(d.location, 120)) return fail(res, 400, 'Name, supported category and pickup area are required');
     if (d.photo && !/^data:image\/(png|jpeg|webp);base64,/.test(d.photo)) return fail(res, 400, 'Photo must be a JPEG, PNG or WebP image');
-    const location = str(d.location, 120), c = coordsFor(location), notes = str(d.notes, 400);
-    const flags = screening({category: d.category, notes, photo: d.photo}).flags;
-    const {insertId} = await db.query(`INSERT INTO furniture (donor_id, name, category, dimensions, weight_kg,
-                                                              pickup_area, lat, lng, notes, photo, screening_flags)
-                                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [req.user.id, str(d.name, 100), d.category, str(d.dimensions, 100) || 'Not supplied', Math.min(9999, Math.max(0, Number(d.weight) || 0)), location, c.lat, c.lng, notes, d.photo || null, JSON.stringify(flags)]);
-    await log(req.user.id, `Donation submitted: ${str(d.name, 100)} by ${req.user.name}`);
+    const location = str(d.location, 120), address = str(d.address, 200) || null, notes = str(d.notes, 400);
+    const c = await geo.locate(address, location);
+    // A video-intake item: the AI verdict is re-read from the vision service, never taken from the browser.
+    let visionResult = null, photo = d.photo || null;
+    if (d.vision) {
+        const v = await vision.resultForItem(d.vision.intakeId, d.vision.itemIndex, req.user.id);
+        visionResult = v.stored;
+        photo = photo || v.photo;
+    }
+    const flags = screening({category: d.category, notes, photo}).flags;
+    // Photo-only donations get the OCI photo scan; video donations already carry their analysis.
+    const scanning = !visionResult && !!photo && photoScan.isConfigured();
+    const {insertId} = await db.query(`INSERT INTO furniture (donor_id, name, category, dimensions, weight_kg, pickup_area, pickup_address,
+                                                              lat, lng, geo_precise, notes, photo, screening_flags, vision_result)
+                                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [req.user.id, str(d.name, 100), d.category, str(d.dimensions, 100) || 'Not supplied', Math.min(9999, Math.max(0, Number(d.weight) || 0)), location, address,
+            c.lat, c.lng, c.precise ? 1 : 0, notes, photo, JSON.stringify(flags),
+            visionResult ? JSON.stringify(visionResult) : scanning ? JSON.stringify({status: 'scanning'}) : null]);
+    await log(req.user.id, `Donation submitted${visionResult ? ' via video' : ''}: ${str(d.name, 100)} by ${req.user.name}`);
+    // The photo scan takes a few seconds, so it runs after the response; the item shows "scanning" until it finishes.
+    if (scanning) scanFurniture(insertId).catch(e => console.error('Photo scan failed:', e));
     res.status(201).json(toFurniture(await db.one(FURNITURE_SQL + ' WHERE f.id = ?', [insertId])));
 }));
 app.get('/api/furniture/mine', requireRole('donor'), h(async (req, res) => {
@@ -299,7 +324,9 @@ app.get('/api/furniture/available', requireRole('user', 'admin'), h(async (req, 
     const rows = await db.query(`SELECT f.*,
                                         (SELECT r.status
                                          FROM requests r
-                                         WHERE r.furniture_id = f.id AND r.user_id = ? AND r.status = 'pending' LIMIT 1) AS my_request
+                                         WHERE r.furniture_id = f.id
+                                           AND r.user_id = ?
+                                           AND r.status = 'pending' LIMIT 1) AS my_request
                                  FROM furniture f
                                  WHERE ${AVAILABLE_SQL}
                                  ORDER BY f.id DESC`, [req.user.id]);
@@ -354,6 +381,15 @@ app.get('/api/donors/:id/furniture', requireRole('admin'), h(async (req, res) =>
         donor: publicUser(donor),
         furniture: (await db.query(FURNITURE_SQL + ' WHERE f.donor_id = ? ORDER BY f.id DESC', [donor.id])).map(r => toFurniture(r))
     });
+}));
+app.post('/api/furniture/:id/scan', requireRole('admin'), h(async (req, res) => {
+    const f = await db.one('SELECT id, photo, vision_result FROM furniture WHERE id = ?', [req.params.id]);
+    if (!f) return fail(res, 404, 'Donation not found');
+    if (!f.photo) return fail(res, 400, 'This donation has no photo');
+    if (parseJson(f.vision_result, {}).source === 'video') return fail(res, 400, 'This donation was analyzed from its video');
+    if (!photoScan.isConfigured()) return fail(res, 503, 'Photo scanning is not configured (OCI credentials missing)');
+    await scanFurniture(f.id);
+    res.json(toFurniture(await db.one(FURNITURE_SQL + ' WHERE f.id = ?', [f.id])));
 }));
 app.post('/api/furniture/:id/review', requireRole('admin'), h(async (req, res) => {
     const {status} = req.body || {};
@@ -450,7 +486,7 @@ app.post('/api/tasks/:id/complete', requireRole('volunteer', 'admin'), h(async (
     res.json({ok: true});
 }));
 
-// ---------- Routes (straight-line nearest-neighbor heuristic) ----------
+// ---------- Routes (road routing via OSRM, straight-line fallback) ----------
 function km(a, b) {
     const r = Math.PI / 180, dx = (b.lat - a.lat) * r, dy = (b.lng - a.lng) * r;
     const q = Math.sin(dx / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dy / 2) ** 2;
@@ -459,44 +495,85 @@ function km(a, b) {
 
 const round = (x) => Math.round(x * 10) / 10;
 
+// Used only when the routing service is unreachable: nearest neighbor on straight lines, 35 km/h average.
+function straightLinePlan(depot, stops) {
+    const order = [], remaining = stops.map((_, i) => i), legs = [];
+    let at = depot;
+    while (remaining.length) {
+        let best = 0;
+        remaining.forEach((i, j) => {
+            if (km(at, stops[i]) < km(at, stops[remaining[best]])) best = j
+        });
+        const i = remaining.splice(best, 1)[0];
+        legs.push(km(at, stops[i]));
+        order.push(i);
+        at = stops[i];
+    }
+    legs.push(km(at, depot));
+    const total = legs.reduce((a, b) => a + b, 0);
+    return {
+        order,
+        legs: legs.map(k => ({km: k, min: k / 35 * 60})),
+        km: total,
+        min: total / 35 * 60,
+        geometry: [depot, ...order.map(i => stops[i]), depot].map(p => [p.lat, p.lng]),
+        baselineKm: stops.reduce((s, p) => s + 2 * km(depot, p), 0)
+    };
+}
+
 app.get('/api/routes', requireRole('admin', 'volunteer'), h(async (req, res) => {
     const mine = req.user.role === 'volunteer';
-    const tasks = (await db.query(TASK_SQL + " WHERE t.status = 'assigned'" + (mine ? ' AND t.volunteer_id = ?' : ''), mine ? [req.user.id] : [])).map(toTask);
+    const tasks = (await db.query(TASK_SQL + " WHERE t.status = 'assigned'" + (mine ? ' AND t.volunteer_id = ?' : '') + ' ORDER BY t.id', mine ? [req.user.id] : [])).map(toTask);
     const byVolunteer = new Map();
     tasks.forEach(t => byVolunteer.set(t.volunteerId, [...(byVolunteer.get(t.volunteerId) || []), t]));
-    let optimized = 0, baseline = 0;
-    const trucks = [...byVolunteer.values()].map(list => {
-        const stops = [], remaining = [...list];
-        let at = depot, dist = 0;
-        while (remaining.length) {
-            let best = 0;
-            remaining.forEach((p, i) => {
-                if (km(at, p) < km(at, remaining[best])) best = i
-            });
-            const p = remaining.splice(best, 1)[0];
-            dist += km(at, p);
-            stops.push({
+    let optimized = 0, baseline = 0, roads = true;
+    const trucks = [];
+    // Sequential on purpose: the public OSRM server asks for light use.
+    for (const list of byVolunteer.values()) {
+        let plan;
+        try {
+            plan = await geo.planTrip(depot, list);
+        } catch (e) {
+            console.warn('Road routing unavailable, using straight lines:', e.message);
+            plan = straightLinePlan(depot, list);
+            roads = false;
+        }
+        const ordered = plan.order.map(i => list[i]);
+        optimized += plan.km;
+        baseline += plan.baselineKm;
+        trucks.push({
+            name: list[0].volunteerName,
+            stops: ordered.map((p, i) => ({
                 id: p.id,
                 label: (p.type === 'pickup' ? 'Pickup: ' : 'Delivery: ') + p.furnitureName,
                 kind: p.type,
                 area: p.area,
+                address: p.address,
+                precise: p.geoPrecise,
+                contact: p.contactName,
                 lat: p.lat,
-                lng: p.lng
-            });
-            at = p;
-        }
-        if (stops.length) dist += km(at, depot);
-        optimized += dist;
-        baseline += list.reduce((s, p) => s + 2 * km(depot, p), 0);
-        return {name: list[0].volunteerName, stops, distanceKm: round(dist)};
-    });
+                lng: p.lng,
+                legKm: round(plan.legs[i].km),
+                legMin: Math.round(plan.legs[i].min)
+            })),
+            returnKm: round(plan.legs[plan.legs.length - 1].km),
+            distanceKm: round(plan.km),
+            durationMin: Math.round(plan.min),
+            geometry: plan.geometry,
+            navigationUrl: geo.googleMapsUrl(depot, ordered)
+        });
+    }
     res.json({
         depot,
         trucks,
         optimizedKm: round(optimized),
         baselineKm: round(baseline),
         savingsPct: baseline ? Math.round((1 - optimized / baseline) * 100) : 0,
-        method: 'One route per volunteer, nearest-neighbor on straight-line distances between area centers; not road routing or capacity-aware.'
+        totalMin: trucks.reduce((s, t) => s + t.durationMin, 0),
+        provider: roads ? 'osrm' : 'straight-line',
+        method: roads
+            ? 'Road routes from OpenStreetMap data (OSRM): each volunteer\'s stops are put in the shortest driving order, starting and ending at the depot. Drive times exclude loading and traffic.'
+            : 'The road routing service is unreachable, so these are straight-line estimates (nearest neighbor). Try again shortly.'
     });
 }));
 
@@ -507,7 +584,8 @@ app.get('/api/users', requireRole('admin'), h(async (req, res) => {
                                         (SELECT COUNT(*) FROM requests r WHERE r.user_id = u.id)   AS requests,
                                         (SELECT COUNT(*)
                                          FROM tasks t
-                                         WHERE t.volunteer_id = u.id AND t.status = 'assigned')    AS open_tasks
+                                         WHERE t.volunteer_id = u.id
+                                           AND t.status = 'assigned')                              AS open_tasks
                                  FROM users u
                                  ORDER BY FIELD(u.role, 'admin', 'volunteer', 'donor', 'user'), u.name`);
     res.json(rows.map(u => ({
@@ -546,11 +624,45 @@ app.post('/api/admin/reset', requireRole('admin'), h(async (req, res) => {
 
 // ---------- Screening ----------
 app.post('/api/screen', requireRole('donor', 'admin'), (req, res) => res.json(screening(req.body || {})));
-// Vision model: not implemented yet (see server/vision.cjs).
-app.post('/api/vision', requireRole('donor', 'admin'), h(async (req, res) => {
-    if (!vision.isConfigured()) return fail(res, 501, 'Vision model not implemented yet');
-    res.json(await vision.analyzePhoto(req.body || {}));
+// ---------- Photo scan (OCI AI Vision + OCI Generative AI, see server/photo-scan.cjs) ----------
+async function scanFurniture(id) {
+    const f = await db.one('SELECT * FROM furniture WHERE id = ?', [id]);
+    if (!f?.photo || !photoScan.isConfigured() || parseJson(f.vision_result, {}).source === 'video') return null;
+    await db.query('UPDATE furniture SET vision_result = ? WHERE id = ?', [JSON.stringify({status: 'scanning'}), id]);
+    let result;
+    try {
+        result = await photoScan.analyzePhoto({photo: f.photo, category: f.category, name: f.name, notes: f.notes});
+    } catch (e) {
+        console.error('Photo scan error:', e.message);
+        result = {status: 'error', error: String(e.message).slice(0, 200), scannedAt: new Date().toISOString()};
+    }
+    const flags = parseJson(f.screening_flags, []).filter(x => !x.startsWith('Photo scan')).concat(photoScan.flagsFor(result));
+    await db.query('UPDATE furniture SET vision_result = ?, screening_flags = ? WHERE id = ?', [JSON.stringify(result), JSON.stringify(flags), id]);
+    return result;
+}
+
+// Preview scan from the donation form (nothing is stored). Limited per user because each scan calls OCI.
+const scanTimes = new Map();
+app.post('/api/vision/photo', requireRole('donor', 'admin'), h(async (req, res) => {
+    if (!photoScan.isConfigured()) return fail(res, 503, 'Photo scanning is not configured (OCI credentials missing)');
+    const recent = (scanTimes.get(req.user.id) || []).filter(t => Date.now() - t < 60000);
+    if (recent.length >= 6) return fail(res, 429, 'Too many photo scans. Please wait a minute.');
+    scanTimes.set(req.user.id, [...recent, Date.now()]);
+    const b = req.body || {};
+    try {
+        res.json(await photoScan.analyzePhoto({photo: b.photo, category: str(b.category, 40), name: str(b.name, 100), notes: str(b.notes, 400)}));
+    } catch (e) {
+        if (e.status === 400) return fail(res, 400, e.message);
+        console.error('Photo scan error:', e.message);
+        fail(res, 502, 'The photo scan service did not respond. You can still submit; an admin will review the photo.');
+    }
 }));
+
+// Video intake (see server/vision.cjs and ../vision-service).
+app.get('/api/vision/status', requireRole(), h(async (req, res) => res.json(await vision.status())));
+app.post('/api/vision/video', requireRole('donor'), h(async (req, res) => res.json(await vision.analyzeVideo(req, req.user.id))));
+// Unauthenticated so <img>/<video> tags work; paths contain an unguessable 128-bit id.
+app.get('/api/vision/media/*', (req, res) => vision.pipeMedia(req.params[0], req, res));
 
 app.use('/api', (req, res) => fail(res, 404, 'Not found'));
 
@@ -564,12 +676,15 @@ app.use((err, req, res, next) => {
     console.error(err);
     if (res.headersSent) return next(err);
     if (err.type === 'entity.too.large') return fail(res, 413, 'Upload is too large');
+    if (err instanceof vision.VisionError) return fail(res, err.status, err.message);
     if (err.code === 'ECONNREFUSED' || err.code === 'ER_ACCESS_DENIED_ERROR' || err.code === 'ER_BAD_DB_ERROR') return fail(res, 503, 'Database unavailable: check the MYSQL_* settings in .env');
     fail(res, 500, 'Server error');
 });
 
 const port = Number(process.env.PORT) || 3001;
 db.init()
+    // A scan interrupted by a restart would stay "scanning" forever; clear it so an admin can re-scan.
+    .then(() => db.query(`UPDATE furniture SET vision_result = NULL WHERE vision_result LIKE '{"status":"scanning"%'`))
     .then(() => app.listen(port, process.env.HOST || '0.0.0.0', () => console.log(`Move-In Ready API listening on http://localhost:${port} (MySQL ${db.config.host}:${db.config.port}/${db.config.database})`)))
     .catch(e => {
         console.error('Could not initialise MySQL:', e.message);

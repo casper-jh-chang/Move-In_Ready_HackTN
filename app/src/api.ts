@@ -43,6 +43,16 @@ export async function request<T>(url: string, method = 'GET', body?: unknown): P
     return data
 }
 
+// Multipart upload (the JSON helper above can't carry a video file).
+export async function upload<T>(url: string, form: FormData): Promise<T> {
+    const token = getToken();
+    const r = await fetch(API + url, {method: 'POST', headers: token ? {Authorization: 'Bearer ' + token} : {}, body: form});
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401 && token) onUnauthorized();
+    if (!r.ok) throw new ApiError(data.error || 'Upload failed', r.status);
+    return data
+}
+
 export type AppContext = {
     user: User,
     meta: Meta,

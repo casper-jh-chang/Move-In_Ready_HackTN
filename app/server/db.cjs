@@ -32,6 +32,14 @@ async function transaction(fn) {
     }
 }
 
+// Columns added after the first release; applied to existing databases on startup.
+const MIGRATIONS = [
+    ['users', 'address', 'VARCHAR(200) NULL AFTER area'],
+    ['users', 'geo_precise', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER lng'],
+    ['furniture', 'pickup_address', 'VARCHAR(200) NULL AFTER pickup_area'],
+    ['furniture', 'geo_precise', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER lng']
+];
+
 const TABLES = ['activity_log', 'tasks', 'requests', 'furniture', 'sessions', 'users'];
 
 // Creates the database (if allowed), applies schema.sql, and seeds demo data when the users table is empty.
@@ -49,6 +57,10 @@ async function init({reset = false, createDatabase = false} = {}) {
             for (const t of TABLES) await conn.query('DROP TABLE IF EXISTS ??', [t]);
         }
         await conn.query(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+        for (const [table, column, ddl] of MIGRATIONS) {
+            const [rows] = await conn.query('SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?', [table, column]);
+            if (!rows.length) await conn.query(`ALTER TABLE ?? ADD COLUMN ?? ${ddl}`, [table, column]);
+        }
     } finally {
         await conn.end();
     }

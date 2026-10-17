@@ -1,0 +1,4 @@
+# Extra dependency for running speech-to-text on this computer (TRANSCRIBE_PROVIDER=local).
+# The vision model runs in Ollama, which is installed separately: https://ollama.com/download
+-r requirements.txt
+faster-whisper>=1.0

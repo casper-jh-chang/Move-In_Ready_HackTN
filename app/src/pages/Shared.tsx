@@ -4,6 +4,7 @@ import {request, useApp, useLoad} from '../api';
 import {PageHeader, Stat} from '../ui';
 import type {Activity, Impact, Stats, User} from '../types';
 import {DonationForm} from './Donor';
+import {VideoIntake} from './VideoIntake';
 
 type Priority = { icon: React.ReactNode, tone: string, title: string, text: string, tab: string };
 
@@ -18,7 +19,7 @@ export function Overview() {
     const {user, go} = useApp();
     const {data: s, reload} = useLoad<Stats>('/stats');
     const {data: activity, reload: reloadActivity} = useLoad<Activity[]>(['admin', 'volunteer'].includes(user.role) ? '/activity' : null);
-    const [donating, setDonating] = useState(false);
+    const [donating, setDonating] = useState<'form' | 'video' | null>(null);
     const v = (k: string) => Number(s?.[k] ?? 0);
     const hero = HERO[user.role];
     const statCards: Record<string, React.ReactNode> = {
@@ -58,7 +59,7 @@ export function Overview() {
     ] : [
         {icon: <Package size={19}/>, tone: 'sage', title: 'Browse furniture', text: `${v('available')} items available to request`, tab: 'browse'},
         {icon: <Send size={19}/>, tone: 'blue', title: 'My requests', text: `${v('pending') + v('approved')} in progress`, tab: 'requests'},
-        {icon: <Users size={19}/>, tone: 'amber', title: 'Update my profile', text: 'Set your area so deliveries are routed correctly', tab: 'profile'}
+        {icon: <Users size={19}/>, tone: 'amber', title: 'Update my profile', text: 'Add your street address so routes are planned correctly', tab: 'profile'}
     ];
     return <>
         <div className="welcome">
@@ -67,7 +68,7 @@ export function Overview() {
                 <h1>{hero.title.split(' ').slice(0, -2).join(' ')}<br/><em>{hero.title.split(' ').slice(-2).join(' ')}</em></h1>
                 <p>{hero.text}</p>
                 <div className="hero-actions">
-                    {user.role === 'donor' && <button className="primary" onClick={() => setDonating(true)}><Plus size={17}/> New donation</button>}
+                    {user.role === 'donor' && <button className="primary" onClick={() => setDonating('form')}><Plus size={17}/> New donation</button>}
                     {user.role === 'admin' && <button className="primary" onClick={() => go('donations')}><Camera size={17}/> Review donations</button>}
                     {hero.action && <button className="primary" onClick={() => go(hero.action!.tab)}>{hero.action.label} <ArrowRight size={17}/></button>}
                     <button className="secondary light" onClick={() => go('impact')}>See our impact <ArrowRight size={17}/></button>
@@ -106,7 +107,7 @@ export function Overview() {
                 <div className="priority-list">{priorities.map(p => <div className="priority" key={p.title}>
                     <span className={'round-icon ' + p.tone}>{p.icon}</span>
                     <div><strong>{p.title}</strong><p>{p.text}</p></div>
-                    <button onClick={() => p.title === 'Donate an item' ? setDonating(true) : go(p.tab)} aria-label={p.title}><ArrowRight size={18}/></button>
+                    <button onClick={() => p.title === 'Donate an item' ? setDonating('form') : go(p.tab)} aria-label={p.title}><ArrowRight size={18}/></button>
                 </div>)}</div>
             </section>
             {activity && <section className="panel">
@@ -118,7 +119,8 @@ export function Overview() {
                 </div>)}</div>
             </section>}
         </div>
-        {donating && <DonationForm onClose={() => setDonating(false)} onSaved={reload}/>}
+        {donating === 'form' && <DonationForm onClose={() => setDonating(null)} onSaved={reload} onVideo={() => setDonating('video')}/>}
+        {donating === 'video' && <VideoIntake onClose={() => setDonating(null)} onSaved={reload}/>}
     </>
 }
 
@@ -150,7 +152,7 @@ export function ImpactPage() {
 
 export function Profile({onUpdated}: { onUpdated: (u: User) => void }) {
     const {user, meta, setError, notify} = useApp();
-    const [form, setForm] = useState({name: user.name, phone: user.phone || '', area: user.area || meta.areas[0]});
+    const [form, setForm] = useState({name: user.name, phone: user.phone || '', area: user.area || meta.areas[0], address: user.address || ''});
     const save = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
@@ -162,13 +164,16 @@ export function Profile({onUpdated}: { onUpdated: (u: User) => void }) {
     };
     return <>
         <PageHeader eyebrow="MY PROFILE" title="Account details"
-                    description={user.role === 'user' ? 'Your area is used to plan deliveries to you.' : user.role === 'donor' ? 'Your area is the default pickup location for new donations.' : 'Your contact details.'}/>
+                    description={user.role === 'user' ? 'Your address is used to route deliveries to you. Only staff and your assigned volunteer see it.' : user.role === 'donor' ? 'Your address is the default pickup location for new donations. Recipients never see it.' : 'Your contact details.'}/>
         <form className="panel profile-form" onSubmit={save}>
             <div className="form-grid">
                 <label>Full name<input required value={form.name} onChange={e => setForm({...form, name: e.target.value})}/></label>
                 <label>Email<input value={user.email} disabled/></label>
                 <label>Area<select value={form.area} onChange={e => setForm({...form, area: e.target.value})}>{meta.areas.map(a => <option key={a}>{a}</option>)}</select></label>
                 <label>Phone<input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})}/></label>
+                {(user.role === 'user' || user.role === 'donor') && <label>Street address<input value={form.address} maxLength={200} placeholder="e.g. 615 Church St"
+                                                                                                onChange={e => setForm({...form, address: e.target.value})}/>
+                    <small className="hint">{user.address ? (user.geoPrecise ? 'Found on the map.' : 'Not found on the map; the area center is used.') : 'Without an address, routes use your area center.'}</small></label>}
             </div>
             <div className="modal-actions">
                 <button className="primary">Save changes</button>

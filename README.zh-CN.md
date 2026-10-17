@@ -6,7 +6,7 @@
 
 有人搬走，留下还能用的家具；有人刚结束无家可归的日子，搬进空荡荡的新家。Move-In Ready 把前者的家具送到后者手里，不让它们进填埋场。整个设计围绕 **[House2Home Nashville](https://www.house2homenashville.org/)** 的真实流程。这是一家全部由志愿者运营的家具银行。我们用 **OCI Generative AI** 接手最耗志愿者时间的人工环节，但最终决定始终由人来做。
 
-> 当前状态：选题于 2026-10-17 确定，还没开始写代码，下文都是计划。本项目只使用合成数据。我们和 House2Home 没有隶属关系，也不使用任何真实的客户或捐赠者信息。
+> 当前状态：选题于 2026-10-17 确定，第一个模块“视频预审 + 自动入库”已经做好，可以在本地运行（见 [docs/video-intake.md](docs/video-intake.md)），其余部分仍是计划。本项目只使用合成数据。我们和 House2Home 没有隶属关系，也不使用任何真实的客户或捐赠者信息。
 
 ---
 
@@ -36,7 +36,7 @@
 
 ### MVP（必做）
 
-1. **拍照预审。** 捐赠者上传物品照片，OCI GenAI 视觉模型识别品类、估计尺寸，检查污渍、破损和宠物毛发，再对照 House2Home 的“收与不收”规则，给出**接收**、**拒收（附原因）**或**转人工**。拒收时推荐其他去处，例如大家电可以交给 Habitat ReStore。
+1. **视频预审**（*已完成*）。捐赠者绕着家具拍一段短视频并口头介绍，OCI GenAI 多模态模型同时看画面、听语音，识别品类、估计尺寸，检查污渍、破损和宠物毛发，再对照 House2Home 的“收与不收”规则，给出**接收**、**拒收（附原因）**或**转人工**。拒收时推荐其他去处，例如大家电可以交给 Habitat ReStore。
 2. **自动入库。** 每件接收的物品自动生成库存卡片，包括品类、房间、尺寸、成色、照片、存放位置和状态（*已认捐 → 在库 → 已分配 → 已送达*）。
 3. **按户匹配。** LLM 把社工的转介表（勾选项，加上“客户坐轮椅，住三楼，没电梯”这类补充说明）转成结构化需求。系统再用库存和已认捐的物品给每户配一套**家具包**，并标出缺口：缺床就提示动用现金基金，缺小件就加进当月的 Amazon 认捐清单。
 4. **志愿者仪表盘。** 审核队列、库存、家具包和缺口集中在一个界面里。
@@ -91,13 +91,25 @@
 | 层 | 选择 |
 |---|---|
 | 前端 | React + TypeScript + Vite |
-| AI | OCI Generative AI（视觉 + 文本）；OCI Vision 备选 |
-| 路线规划（加分项） | OR-Tools |
-| 数据 | 合成种子数据；存储待定（OCI Autonomous DB，或者 Demo 用的轻量本地存储） |
+| AI | OCI Generative AI（Llama 4 Maverick 多模态）+ OCI AI Vision；语音用本地 Whisper |
+| 路线规划 | OSRM 道路路线 + OpenStreetMap（Leaflet 地图），Nominatim 地址解析 |
+| 数据 | OCI 上的 MySQL HeatWave（合成演示数据） |
+
+Oracle Cloud 各部分的用法和配置见 [docs/oracle-cloud.md](docs/oracle-cloud.md)（英文）。
 
 ## 本地运行
 
-应用还没有搭建，搭好后会在这里补上运行步骤。
+需要 Node 16.20+、MySQL 8、Python 3.11+ 和 ffmpeg。默认的 `mock` 模式不需要任何云账号。
+
+网站在 `app/` 目录（React + Express + MySQL，安装步骤见 [app/README.md](app/README.md)）。AI 视频识别是 `vision-service/` 里一个单独的 Python 服务：
+
+```bash
+cd vision-service && pip install -r requirements.txt && cp .env.example .env
+cd ../app && npm install && cp .env.example .env && npm run db:init
+npm run dev:video     # 同时启动视频服务 :8000、API :3001、网页 :5173
+```
+
+测试：`cd vision-service && python -m pytest -q`。本地模型、接入 OCI 和规则表见 [docs/video-intake.md](docs/video-intake.md)。
 
 ---
 
@@ -119,4 +131,11 @@ docs/
   needs-research.md         纳什维尔本地需求调研
   house2home-analysis.md    House2Home 流程拆解
   h2h-outreach-email.md     外联邮件草稿
+  video-intake.md           视频预审：设计、规则、运行说明
+app/                        网站：React 前端、Express API、MySQL（捐赠者、管理员、志愿者、受助者）
+  src/pages/VideoIntake.tsx 录制或上传环绕视频、查看 AI 结果、提交
+  server/vision.cjs         把视频转给视频服务，保存识别结果
+vision-service/
+  app/                      FastAPI：ffmpeg 抽帧、多模态模型（mock/Ollama/OCI）、规则引擎
+  rules/house2home.json     收与不收规则、替代去处、估重
 ```

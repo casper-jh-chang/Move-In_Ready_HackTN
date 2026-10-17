@@ -12,7 +12,7 @@ const DEMO = [
 
 export default function Auth({meta, onAuth}: { meta: Meta | null, onAuth: (token: string, user: User) => void }) {
     const [mode, setMode] = useState<'login' | 'register'>('login'), [error, setError] = useState(''), [busy, setBusy] = useState(false);
-    const [form, setForm] = useState({name: '', email: '', password: '', role: 'donor', area: 'Downtown', phone: ''});
+    const [form, setForm] = useState({name: '', email: '', password: '', role: 'donor', area: 'Downtown', address: '', phone: ''});
     const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({...form, [k]: e.target.value});
     const submit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -61,6 +61,7 @@ export default function Auth({meta, onAuth}: { meta: Meta | null, onAuth: (token
                 {mode === 'register' && <>
                     <label>Area in Nashville
                         <select value={form.area} onChange={set('area')}>{(meta?.areas || []).map(a => <option key={a}>{a}</option>)}</select></label>
+                    <label>Street address (optional)<input value={form.address} maxLength={200} placeholder="Used for pickups / deliveries" onChange={set('address')}/></label>
                     <label>Phone (optional)<input value={form.phone} onChange={set('phone')}/></label>
                     <small className="hint">Volunteer and admin accounts are created by an admin.</small>
                 </>}
