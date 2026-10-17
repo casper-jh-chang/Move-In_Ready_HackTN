@@ -1,0 +1,10 @@
+module.exports={donations:[
+{id:101,name:'Oak dining table',category:'Dining table',condition:'Good',status:'approved',inventoryStatus:'in_stock',donor:'Maya L.',location:'East Nashville',lat:36.182,long:-86.747,dimensions:'60 × 36 in',notes:'Seats four. Light surface wear.',weight:35,created:'2026-10-16'},
+{id:102,name:'Blue fabric sofa',category:'Sofa',condition:'Good',status:'approved',inventoryStatus:'in_stock',donor:'Daniel K.',location:'The Nations',lat:36.161,long:-86.859,dimensions:'78 × 34 in',notes:'Clean, no pets.',weight:55,created:'2026-10-16'},
+{id:103,name:'Twin bed frame',category:'Bed frame',condition:'Good',status:'approved',inventoryStatus:'in_stock',donor:'Olivia R.',location:'Berry Hill',lat:36.116,long:-86.770,dimensions:'Twin',notes:'Frame only. Mattress not included.',weight:25,created:'2026-10-15'},
+{id:104,name:'Used mattress',category:'Mattress',condition:'Unknown',status:'rejected',inventoryStatus:'rejected',donor:'Demo donor',location:'Germantown',lat:36.178,long:-86.790,dimensions:'Queen',notes:'Used mattresses are not accepted under demo rules.',weight:30,created:'2026-10-14'},
+{id:105,name:'Walnut nightstand',category:'Nightstand',condition:'Good',status:'pending',inventoryStatus:'pledged',donor:'Jules P.',location:'12 South',lat:36.126,long:-86.791,dimensions:'20 × 18 in',notes:'Awaiting volunteer photo review.',weight:12,created:'2026-10-17'}],
+families:[{id:201,code:'HH-204',area:'Antioch',lat:36.060,long:-86.670,moveIn:'2026-10-23',members:'1 adult · 2 children',priority:2,bedCount:2,needs:['Dining table','Bed frame','Nightstand'],notes:'Second-floor unit; stairs only.',status:'waiting'},
+{id:202,code:'HH-219',area:'Madison',lat:36.252,long:-86.714,moveIn:'2026-10-26',members:'2 adults',priority:1,bedCount:0,needs:['Sofa','Dining table'],notes:'Ground-floor delivery.',status:'waiting'},
+{id:203,code:'HH-225',area:'South Nashville',lat:36.100,long:-86.745,moveIn:'2026-10-29',members:'1 adult',priority:1,bedCount:0,needs:['Bed frame','Nightstand'],notes:'Elevator available.',status:'waiting'}],
+assignments:[],reviewLog:[],activities:[{id:1,text:'Demo inventory loaded',date:'Oct 17 · 9:00 AM'}]};
