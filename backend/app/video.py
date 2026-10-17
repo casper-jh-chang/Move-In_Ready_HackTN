@@ -31,8 +31,22 @@ class VideoInfo:
     has_audio: bool
 
 
+INSTALL_HINT = (
+    "ffmpeg is not installed or not on PATH. Install it (macOS: brew install ffmpeg; "
+    "Windows: winget install Gyan.FFmpeg, then reopen the terminal; Ubuntu/WSL: sudo apt install ffmpeg) "
+    "and restart the backend."
+)
+
+
+def missing_tools() -> list[str]:
+    return [t for t in ("ffmpeg", "ffprobe") if shutil.which(t) is None]
+
+
 def _run(cmd: list[str]) -> str:
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError as e:
+        raise VideoError(f"{cmd[0]} not found. {INSTALL_HINT}") from e
     if proc.returncode != 0:
         raise VideoError(f"{cmd[0]} failed: {proc.stderr.strip()[-500:]}")
     return proc.stdout
@@ -59,10 +73,13 @@ def probe(path: Path) -> VideoInfo:
 
 
 def _decoded_duration(path: Path) -> float:
-    proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:v:0", "-f", "null", "-progress", "pipe:1", "-"],
-        capture_output=True, text=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:v:0", "-f", "null", "-progress", "pipe:1", "-"],
+            capture_output=True, text=True,
+        )
+    except FileNotFoundError as e:
+        raise VideoError(f"ffmpeg not found. {INSTALL_HINT}") from e
     times = [line.split("=", 1)[1] for line in proc.stdout.splitlines() if line.startswith("out_time_us=")]
     us = [int(t) for t in times if t.strip().lstrip("-").isdigit()]
     return max(us, default=0) / 1e6

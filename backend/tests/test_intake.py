@@ -182,3 +182,16 @@ def test_ollama_not_running_gives_clear_error(monkeypatch, tmp_path):
     monkeypatch.setattr(httpx, "post", refuse)
     with pytest.raises(RuntimeError, match="ollama serve"):
         OllamaProvider(Settings()).analyze(ModelInput(mode="frames", frames=[Frame(p, 0)], duration=1))
+
+
+def test_missing_ffmpeg_gives_install_hint(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    from app import video
+
+    def not_found(*a, **k):
+        raise FileNotFoundError(2, "No such file or directory", "ffprobe")
+
+    monkeypatch.setattr(sp, "run", not_found)
+    with pytest.raises(video.VideoError, match="brew install ffmpeg"):
+        video.probe(tmp_path / "x.mp4")

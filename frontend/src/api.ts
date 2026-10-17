@@ -85,6 +85,7 @@ export interface Config {
   model: string;
   input_mode: string;
   max_video_seconds: number;
+  missing_tools: string[];
   statuses: Status[];
 }
 

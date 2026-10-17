@@ -16,7 +16,7 @@ from .config import BACKEND_DIR, settings
 from .db import DB, STATUSES
 from .pipeline import run_intake
 from .providers import ModelOutputError, get_provider
-from .video import VideoError
+from .video import INSTALL_HINT, VideoError, missing_tools
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("intake")
@@ -24,6 +24,8 @@ log = logging.getLogger("intake")
 settings.media_dir.mkdir(parents=True, exist_ok=True)
 db = DB(settings.db_path)
 provider = get_provider(settings)
+if missing := missing_tools():
+    log.error("Missing %s. %s", " and ".join(missing), INSTALL_HINT)
 
 app = FastAPI(title="Move-In Ready · video intake")
 app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
@@ -39,6 +41,7 @@ def config() -> dict:
         "input_mode": settings.input_mode if provider.supports_video else "frames",
         "transcribe": settings.transcribe_provider,
         "max_video_seconds": settings.max_video_seconds,
+        "missing_tools": missing_tools(),
         "statuses": STATUSES,
     }
 

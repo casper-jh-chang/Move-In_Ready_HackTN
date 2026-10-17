@@ -32,6 +32,13 @@ export default function App() {
       </header>
 
       <main>
+        {config && config.missing_tools.length > 0 && (
+          <p className="card error">
+            The backend can't find {config.missing_tools.join(" and ")}, so videos can't be processed. Install ffmpeg
+            (macOS: <code>brew install ffmpeg</code>, Windows: <code>winget install Gyan.FFmpeg</code>, Ubuntu/WSL:{" "}
+            <code>sudo apt install ffmpeg</code>) and restart the backend.
+          </p>
+        )}
         {tab === "donate" &&
           (result ? (
             <>
