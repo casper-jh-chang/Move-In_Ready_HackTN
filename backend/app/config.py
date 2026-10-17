@@ -30,7 +30,7 @@ def _env(name: str, default: str = "") -> str:
 
 @dataclass
 class Settings:
-    # mock | oci | openai
+    # mock | ollama | oci | openai
     vision_provider: str = field(default_factory=lambda: _env("VISION_PROVIDER", "mock"))
     # video: send the whole clip (audio included) to a model that understands video, e.g. Gemini on OCI.
     # frames: send sharp keyframes + a transcript, for image-only models such as Llama 4 on OCI.
@@ -53,6 +53,15 @@ class Settings:
     openai_model: str = field(default_factory=lambda: _env("OPENAI_MODEL", "gpt-4o-mini"))
     transcribe_provider: str = field(default_factory=lambda: _env("TRANSCRIBE_PROVIDER", "none"))
     transcribe_model: str = field(default_factory=lambda: _env("TRANSCRIBE_MODEL", "whisper-1"))
+
+    # Local models: Ollama for vision, faster-whisper for speech
+    ollama_base_url: str = field(default_factory=lambda: _env("OLLAMA_BASE_URL", "http://localhost:11434"))
+    ollama_model: str = field(default_factory=lambda: _env("OLLAMA_MODEL", "qwen2.5vl:7b"))
+    ollama_image_px: int = field(default_factory=lambda: int(_env("OLLAMA_IMAGE_PX", "672")))
+    ollama_num_ctx: int = field(default_factory=lambda: int(_env("OLLAMA_NUM_CTX", "16384")))
+    ollama_timeout_s: int = field(default_factory=lambda: int(_env("OLLAMA_TIMEOUT_S", "600")))
+    whisper_model_size: str = field(default_factory=lambda: _env("WHISPER_MODEL_SIZE", "small"))
+    frames_as_sheet: bool = field(default_factory=lambda: _env("FRAMES_AS_SHEET", "false").lower() == "true")
 
     # Pipeline knobs
     num_keyframes: int = field(default_factory=lambda: int(_env("NUM_KEYFRAMES", "8")))

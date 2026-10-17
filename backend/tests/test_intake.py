@@ -126,3 +126,59 @@ def test_end_to_end_mock_intake(client, tmp_path):
 def test_rejects_non_video(client):
     r = client.post("/api/intake", files={"video": ("notes.txt", b"hello", "text/plain")})
     assert r.status_code == 400
+
+
+def test_ollama_provider_request_and_schema_fallback(tmp_path, monkeypatch):
+    import httpx
+    from PIL import Image
+
+    from app.config import Settings
+    from app.providers import ModelInput, OllamaProvider
+    from app.video import Frame
+
+    frames = []
+    for i in range(3):
+        p = tmp_path / f"f{i}.jpg"
+        Image.new("RGB", (1600, 1200), "gray").save(p)
+        frames.append(Frame(p, float(i)))
+
+    calls = []
+    reply = '{"items":[{"title":"Gray sofa","category":"sofa","is_sleeper":false,"views_covered":["front","back","left"],"confidence":0.8}]}'
+
+    def fake_post(url, json, timeout):
+        calls.append({"url": url, "format": json["format"], "images": json["messages"][1]["images"]})
+        req = httpx.Request("POST", url)
+        if isinstance(json["format"], dict):  # pretend this Ollama build rejects schema formats
+            return httpx.Response(400, json={"error": "invalid format"}, request=req)
+        return httpx.Response(200, json={"message": {"content": reply}}, request=req)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    s = Settings()
+    s.ollama_image_px = 512
+    out = OllamaProvider(s).analyze(ModelInput(mode="frames", frames=frames, duration=3, transcript="a gray sofa"))
+
+    assert out.items[0].category == "sofa"
+    assert calls[0]["url"].endswith("/api/chat") and isinstance(calls[0]["format"], dict)
+    assert calls[1]["format"] == "json" and len(calls[1]["images"]) == 3
+    import base64, io
+    with Image.open(io.BytesIO(base64.b64decode(calls[1]["images"][0]))) as im:
+        assert max(im.size) == 512
+
+
+def test_ollama_not_running_gives_clear_error(monkeypatch, tmp_path):
+    import httpx
+    from PIL import Image
+
+    from app.config import Settings
+    from app.providers import ModelInput, OllamaProvider
+    from app.video import Frame
+
+    p = tmp_path / "f.jpg"
+    Image.new("RGB", (100, 100)).save(p)
+
+    def refuse(*a, **k):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(httpx, "post", refuse)
+    with pytest.raises(RuntimeError, match="ollama serve"):
+        OllamaProvider(Settings()).analyze(ModelInput(mode="frames", frames=[Frame(p, 0)], duration=1))

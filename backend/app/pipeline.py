@@ -42,7 +42,7 @@ def run_intake(
     frames = v.extract_keyframes(source, work / "frames", info.duration, n=settings.num_keyframes)
     playback = v.to_browser_mp4(source, work / "playback.mp4")
 
-    mode = settings.input_mode if provider.name != "mock" else "frames"
+    mode = settings.input_mode if provider.supports_video else "frames"
     transcript = client_transcript.strip()
     inp = ModelInput(mode=mode, frames=frames, duration=info.duration, transcript=transcript)
     if mode == "video":
@@ -55,8 +55,9 @@ def run_intake(
                     inp.transcript = transcribe(audio, settings)
                 except Exception as e:  # transcription is best-effort; the frames still get analysed
                     log.warning("transcription failed: %s", e)
-        if settings.vision_provider == "oci" and "llama-3.2" in settings.oci_model_id:
-            inp.contact_sheet = v.contact_sheet(frames, work / "sheet.jpg")  # one image per request
+        one_image_model = settings.vision_provider == "oci" and "llama-3.2" in settings.oci_model_id
+        if settings.frames_as_sheet or one_image_model:
+            inp.contact_sheet = v.contact_sheet(frames, work / "sheet.jpg")  # one tiled image per request
 
     analysis = provider.analyze(inp)
     if not analysis.transcript:

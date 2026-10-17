@@ -36,7 +36,8 @@ def config() -> dict:
     return {
         "provider": provider.name,
         "model": provider.model,
-        "input_mode": settings.input_mode if provider.name != "mock" else "frames",
+        "input_mode": settings.input_mode if provider.supports_video else "frames",
+        "transcribe": settings.transcribe_provider,
         "max_video_seconds": settings.max_video_seconds,
         "statuses": STATUSES,
     }

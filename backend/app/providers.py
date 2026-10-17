@@ -4,19 +4,23 @@
   video-capable model such as google.gemini-2.5-flash; in "frames" mode keyframes go to an
   image model such as meta.llama-4-maverick, with a transcript in the prompt.
 - OpenAIProvider: any OpenAI-compatible endpoint, frames mode.
+- OllamaProvider: a vision model running on this machine (e.g. qwen2.5vl), frames mode.
 - MockProvider: canned answers so the demo runs with no cloud credentials.
 """
 
 from __future__ import annotations
 
 import base64
+import io
 import json
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 import httpx
+from PIL import Image
 from pydantic import ValidationError
 
 from .config import Settings
@@ -35,9 +39,13 @@ class ModelInput:
     contact_sheet: Path | None = None  # single tiled image for one-image models
 
 
+log = logging.getLogger(__name__)
+
+
 class Provider(Protocol):
     name: str
     model: str
+    supports_video: bool
 
     def analyze(self, inp: ModelInput) -> VideoAnalysis: ...
 
@@ -74,6 +82,7 @@ def _with_retry(call, attempts: int = 2) -> VideoAnalysis:
 
 class OCIProvider:
     name = "oci"
+    supports_video = True
 
     def __init__(self, s: Settings):
         import oci  # imported lazily so mock mode needs no OCI config
@@ -128,6 +137,7 @@ class OCIProvider:
 
 class OpenAIProvider:
     name = "openai"
+    supports_video = False
 
     def __init__(self, s: Settings):
         if not s.openai_api_key:
@@ -162,12 +172,71 @@ class OpenAIProvider:
         return _with_retry(call)
 
 
+class OllamaProvider:
+    """Local vision model served by Ollama (https://ollama.com). No cloud, no API key.
+
+    Frames are shrunk before sending: on a laptop CPU every image token costs seconds.
+    """
+
+    name = "ollama"
+    supports_video = False
+
+    def __init__(self, s: Settings):
+        self.s = s
+        self.model = s.ollama_model
+
+    def _image_b64(self, path: Path) -> str:
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            im.thumbnail((self.s.ollama_image_px, self.s.ollama_image_px))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=85)
+        return base64.b64encode(buf.getvalue()).decode()
+
+    def analyze(self, inp: ModelInput) -> VideoAnalysis:
+        images = [inp.contact_sheet] if inp.contact_sheet else [f.path for f in inp.frames]
+        payload = {
+            "model": self.model,
+            "stream": False,
+            # Structured output: Ollama constrains decoding to this schema.
+            "format": VideoAnalysis.model_json_schema(),
+            "options": {"temperature": 0.1, "num_ctx": self.s.ollama_num_ctx},
+            "messages": [
+                {"role": "system", "content": system_prompt()},
+                {
+                    "role": "user",
+                    "content": user_prompt("frames", [f.t for f in inp.frames], inp.transcript, inp.duration),
+                    "images": [self._image_b64(p) for p in images],
+                },
+            ],
+        }
+        url = f"{self.s.ollama_base_url.rstrip('/')}/api/chat"
+
+        def call() -> str:
+            try:
+                r = httpx.post(url, json=payload, timeout=self.s.ollama_timeout_s)
+            except httpx.ConnectError as e:
+                raise RuntimeError(f"Ollama is not running at {self.s.ollama_base_url} (start it with `ollama serve`).") from e
+            if r.status_code >= 400 and isinstance(payload["format"], dict):
+                # Older Ollama builds reject full JSON schemas; plain JSON mode still works.
+                log.warning("ollama rejected schema format (%s); retrying with format=json", r.status_code)
+                payload["format"] = "json"
+                r = httpx.post(url, json=payload, timeout=self.s.ollama_timeout_s)
+            if r.status_code == 404:
+                raise RuntimeError(f"Model {self.model} not found in Ollama; run `ollama pull {self.model}`.")
+            r.raise_for_status()
+            return r.json()["message"]["content"]
+
+        return _with_retry(call)
+
+
 class MockProvider:
     """Keyword-driven canned results. Say "sleeper", "stain", "dresser" or "table" in the
     narration (or the file name) to see the different outcomes in a demo without OCI."""
 
     name = "mock"
     model = "canned"
+    supports_video = False
 
     def analyze(self, inp: ModelInput) -> VideoAnalysis:
         text = inp.transcript.lower()
@@ -245,11 +314,31 @@ def get_provider(s: Settings) -> Provider:
         return OCIProvider(s)
     if s.vision_provider == "openai":
         return OpenAIProvider(s)
+    if s.vision_provider == "ollama":
+        return OllamaProvider(s)
     return MockProvider()
+
+
+_whisper = None
+
+
+def _local_whisper(s: Settings):
+    """faster-whisper, loaded once. The model downloads on first use (~460 MB for 'small')."""
+    global _whisper
+    if _whisper is None:
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as e:
+            raise RuntimeError("Local transcription needs: pip install -r requirements-local.txt") from e
+        _whisper = WhisperModel(s.whisper_model_size, device="auto", compute_type="int8")
+    return _whisper
 
 
 def transcribe(audio: Path, s: Settings) -> str:
     """Speech-to-text for frames mode. Video mode lets the model listen directly instead."""
+    if s.transcribe_provider == "local":
+        segments, _ = _local_whisper(s).transcribe(str(audio), vad_filter=True)
+        return " ".join(seg.text.strip() for seg in segments).strip()
     if s.transcribe_provider != "openai" or not s.openai_api_key:
         return ""
     with audio.open("rb") as fh:

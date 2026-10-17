@@ -89,6 +89,35 @@ mock 模式按关键词返回预设结果，关键词可以来自口述字幕，
 | `table`、`chair`、`桌`、`椅` | 餐桌 + 4 把椅子（一段视频两件物品）→ 接收 |
 | 其他 | 灰色三人布艺沙发 → 接收 |
 
+### 用本地模型（不需要云账号）
+
+视觉模型跑在 [Ollama](https://ollama.com/download) 里，语音用 faster-whisper，都在自己电脑上。
+
+```bash
+# 1. 装 Ollama（官网下载安装包），然后拉一个视觉模型
+ollama pull qwen2.5vl:7b        # 约 6 GB；电脑慢可以用 qwen2.5vl:3b
+
+# 2. 装本地语音转写
+cd backend
+pip install -r requirements-local.txt
+```
+
+`backend/.env`：
+
+```
+VISION_PROVIDER=ollama
+OLLAMA_MODEL=qwen2.5vl:7b
+TRANSCRIBE_PROVIDER=local
+WHISPER_MODEL_SIZE=small
+```
+
+然后照常启动后端和前端。
+
+- 本地模型只看图，所以固定走 frames 模式：8 张关键帧加文字稿。文字稿优先用浏览器的实时字幕；上传的视频没有字幕时，用 Whisper 从音轨转写。Whisper 模型第一次用时会自动下载（`small` 约 460 MB）。
+- 速度取决于电脑：有独立显卡或 Apple Silicon 时一段视频大约几十秒，纯 CPU 可能要几分钟。太慢可以把 `NUM_KEYFRAMES` 调到 4 到 6，把 `OLLAMA_IMAGE_PX` 调到 448，或者设 `FRAMES_AS_SHEET=true`，把所有帧拼成一张图只发一次。
+- 小模型的识别能力比云端大模型弱，尤其是细小的污渍和沙发床的结构。结果不确定时规则会转人工，这是正常的。
+- 报错 “Ollama is not running” 就先运行 `ollama serve`；报错 “model not found” 就先 `ollama pull` 对应的模型。
+
 ### 接 OCI Generative AI
 
 在 `backend/.env` 里：
@@ -124,7 +153,7 @@ OCI_MODEL_ID=google.gemini-2.5-flash
 ```
 backend/app/video.py      ffmpeg：探测、挑清晰帧、截帧、抽音频、压缩、九宫格
 backend/app/prompts.py    给模型的提示词（只提取事实，附 JSON Schema）
-backend/app/providers.py  OCI / OpenAI 兼容 / mock 三种模型后端，JSON 解析
+backend/app/providers.py  OCI / Ollama 本地 / OpenAI 兼容 / mock 四种模型后端，本地 Whisper，JSON 解析
 backend/app/schema.py     模型输出和判定结果的数据结构
 backend/app/rules.py      规则引擎
 backend/rules/house2home.json  规则、替代去处、各品类估重
