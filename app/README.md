@@ -79,7 +79,9 @@ Open http://localhost:5173. The Express API runs at http://localhost:3001.
 
 ## Photo scan (Oracle Cloud AI)
 
-When a donor uploads a photo, the server scans it with two OCI services (`server/vision.cjs`):
+For everything OCI-related in one place, see `../docs/oracle-cloud.md`.
+
+When a donor uploads a photo, the server scans it with two OCI services (`server/photo-scan.cjs`):
 
 1. **OCI AI Vision** (`analyzeImage`): image classification and object detection ("Table 99%", "Chair 81%")
 2. **OCI Generative AI**, using the multimodal model `meta.llama-4-maverick-17b-128e-instruct-fp8`: the item type, visible condition (Like new / Good / Fair / Poor / Unclear), visible issues and a one-line summary
@@ -91,7 +93,7 @@ How the result is used:
 - The approval dialog pre-selects the condition the scan saw.
 - The scan never approves or rejects anything. An admin always decides.
 
-The scan runs in the background after submission, so the item shows "Scanning…" for a few seconds. Donors can also preview it with **AI photo check** in the form (rate-limited to 6 per minute), and admins can **Re-scan photo**.
+The scan runs in the background after submission, so the item shows "Scanning…" for a few seconds. Donors can also preview it with **AI photo check** in the form (`POST /api/vision/photo`) (rate-limited to 6 per minute), and admins can **Re-scan photo**.
 
 ### Setup
 
@@ -116,6 +118,23 @@ Requests are signed in `server/oci.cjs` with OCI's HTTP Signature scheme, so no 
 
 The public Nominatim and OSRM servers allow light use only (about 1 request per second); results are cached and requests are throttled. For heavier use, run your own instances and set `GEOCODER_URL` / `OSRM_URL`.
 
+## AI video intake
+
+Donors can record (or upload) a 30–60 second walk-around video and describe the item out loud. Entry points: **Donate with a video** on *My donations*, and **AI video intake** inside the regular donation form.
+
+- The Python service in `../vision-service` picks sharp keyframes with ffmpeg, asks a multimodal model what it sees and hears (category, condition, defects with timestamps, sleeper-sofa check, sides shown), and applies the acceptance rules in `vision-service/rules/house2home.json`. The model only describes; the rules suggest accept / review / decline with the rule that fired.
+- `server/vision.cjs` streams the upload to that service and pre-fills one donation per item found. The donor edits and submits; items are saved as `pending` with the AI verdict in `furniture.vision_result`. The server re-reads the verdict from the service (and checks it belongs to that donor) instead of trusting the browser.
+- Admins see the AI verdict on each card and, in Approve/Reject, the video, the rule reasons and defect frames that jump to the right second. A rejection is pre-filled with the rule reason. **An admin still makes every decision.**
+
+Run it (needs Python 3.11+ and ffmpeg):
+
+```bash
+cd ../vision-service && pip install -r requirements.txt && cp .env.example .env
+cd ../app && npm run dev:video     # vision service + API + Vite together
+```
+
+`VISION_PROVIDER=mock` (default) returns canned results with no model; `ollama` runs a local vision model; `oci` uses OCI Generative AI. Details: `../docs/video-intake.md`. If the service is down, the rest of the app keeps working and the video modal says how to start it.
+
 ## API overview
 
 | Endpoint | Who |
@@ -123,8 +142,12 @@ The public Nominatim and OSRM servers allow light use only (about 1 request per 
 | `POST /api/auth/register`, `POST /api/auth/login` | Public (register: donor/user only) |
 | `GET/PATCH /api/auth/me`, `POST /api/auth/logout`, `GET /api/stats`, `GET /api/impact` | Any signed-in user |
 | `POST /api/furniture`, `GET /api/furniture/mine`, `DELETE /api/furniture/:id` | Donor |
-| `POST /api/vision` (photo scan preview), `POST /api/screen` | Donor, admin |
+| `POST /api/vision/photo` (photo scan preview), `POST /api/screen` | Donor, admin |
+| `GET /api/vision/status`, `POST /api/vision/video`, `GET /api/vision/media/*` (video intake) | Signed in / donor / public (random ids) |
 | `GET /api/furniture/available`, `POST /api/requests`, `GET /api/requests/mine`, `POST /api/requests/:id/cancel` | User |
+| `GET /api/vision/status` | Any signed-in user |
+| `POST /api/vision/video` (multipart: `video`, `transcript`) | Donor |
+| `GET /api/vision/media/*` | Public (random 128-bit ids; frames and video for `<img>`/`<video>`) |
 | `GET /api/tasks/mine`, `POST /api/tasks/:id/complete` | Volunteer (admin can also complete) |
 | `GET /api/routes`, `GET /api/activity` | Admin, volunteer |
 | `GET /api/furniture`, `POST /api/furniture/:id/review`, `POST /api/furniture/:id/scan`, `GET /api/donors/:id/furniture` | Admin |

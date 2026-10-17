@@ -2,7 +2,7 @@ import React, {useEffect, useRef} from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {Camera, Loader2, MapPin, Navigation, Package, Truck, X} from 'lucide-react';
-import type {Furniture, Routes, VisionResult} from './types';
+import type {Furniture, PhotoScanResult, Routes, VisionResult} from './types';
 
 const LABELS: Record<string, string> = {
     in_stock: 'In stock', pledged: 'At donor', delivered: 'Delivered', assigned: 'Assigned',
@@ -94,7 +94,12 @@ export function FurnitureCard({item, badge, footer, children}: {
 }
 
 // OCI photo scan shown under a donation's description.
-export function PhotoScan({result, compact}: { result: VisionResult | null | undefined, compact?: boolean }) {
+// The photo scan result, or null for video-intake results (those have their own panel).
+export const photoScanOf = (v: PhotoScanResult | VisionResult | null | undefined): PhotoScanResult | null =>
+    v && 'status' in v ? v : null;
+
+export function PhotoScan({result: raw, compact}: { result: PhotoScanResult | VisionResult | null | undefined, compact?: boolean }) {
+    const result = photoScanOf(raw);
     if (!result) return null;
     if (result.status === 'scanning') return <div className="scan"><Loader2 size={13} className="spin"/> Scanning photo with Oracle Cloud AI…</div>;
     if (result.status === 'error') return <div className="scan scan-error"><Camera size={13}/> Photo scan failed: {result.error}</div>;

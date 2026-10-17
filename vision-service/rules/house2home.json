@@ -1,0 +1,37 @@
+{
+  "org": "House2Home Nashville (demo configuration based on their public accept/decline list; synthetic, not affiliated)",
+  "min_confidence": 0.6,
+  "min_views": 3,
+  "category_rules": {
+    "mattress":        { "outcome": "decline", "rule_id": "CAT-BED", "reason": "Used mattresses are not accepted; every client gets a new bed.", "alternative": "Mattress recycling drop-off (check Metro Nashville convenience centers)." },
+    "bed_frame":       { "outcome": "decline", "rule_id": "CAT-BED", "reason": "Used bed frames and bed parts are not accepted.", "alternative": "Habitat for Humanity ReStore." },
+    "headboard":       { "outcome": "decline", "rule_id": "CAT-BED", "reason": "Used headboards are not accepted.", "alternative": "Habitat for Humanity ReStore." },
+    "sleeper_sofa":    { "outcome": "decline", "rule_id": "CAT-SLEEPER", "reason": "Sleeper sofas are not accepted (too heavy for volunteer crews, mechanisms fail).", "alternative": "Habitat for Humanity ReStore or a local resale group." },
+    "bedding":         { "outcome": "review",  "rule_id": "CAT-BEDDING", "reason": "Only brand-new bedding is accepted; confirm it is still in its package." },
+    "large_appliance": { "outcome": "decline", "rule_id": "CAT-APPLIANCE", "reason": "Large appliances are not accepted.", "alternative": "Habitat for Humanity ReStore." },
+    "tv_stand":        { "outcome": "decline", "rule_id": "CAT-TVSTAND", "reason": "Entertainment centers and TV stands are not accepted.", "alternative": "Habitat for Humanity ReStore or a thrift store." },
+    "tv":              { "outcome": "decline", "rule_id": "CAT-ELECTRONICS", "reason": "TVs and outdated electronics are not accepted.", "alternative": "Electronics recycling (check Metro Nashville convenience centers)." },
+    "electronics":     { "outcome": "decline", "rule_id": "CAT-ELECTRONICS", "reason": "Outdated electronics are not accepted.", "alternative": "Electronics recycling (check Metro Nashville convenience centers)." },
+    "curtains":        { "outcome": "decline", "rule_id": "CAT-CURTAINS", "reason": "Curtains are not accepted.", "alternative": "Goodwill or another thrift donation center." },
+    "clothing":        { "outcome": "decline", "rule_id": "CAT-CLOTHING", "reason": "Clothing is not accepted.", "alternative": "Goodwill or another thrift donation center." },
+    "medical":         { "outcome": "decline", "rule_id": "CAT-MEDICAL", "reason": "Medical supplies and equipment are not accepted.", "alternative": "A medical equipment loan closet." },
+    "desk":            { "outcome": "review",  "rule_id": "CAT-ASNEEDED", "reason": "Desks are taken only when small and currently needed; a volunteer checks size and demand." },
+    "wardrobe":        { "outcome": "review",  "rule_id": "CAT-ASNEEDED", "reason": "Wardrobes are taken only when small and currently needed; a volunteer checks size and demand." },
+    "sectional":       { "outcome": "review",  "rule_id": "CAT-SIZE", "reason": "Sectionals may not fit client apartments or the truck; a volunteer checks size." },
+    "other":           { "outcome": "review",  "rule_id": "CAT-UNKNOWN", "reason": "The item type is not on the standard list; a volunteer decides." }
+  },
+  "upholstered": ["sofa", "loveseat", "sectional", "armchair", "ottoman", "sleeper_sofa"],
+  "decline_defects": {
+    "any_severity": ["mold", "pests", "water_damage"],
+    "moderate_or_worse": ["stain", "tear", "broken", "missing_part", "pet_damage", "odor", "sagging"],
+    "severe": ["scratch", "dent", "wobbly", "fading", "pet_hair", "other"]
+  },
+  "est_weight_lbs": {
+    "sofa": 100, "loveseat": 75, "sleeper_sofa": 150, "sectional": 180, "armchair": 45, "chair": 15, "ottoman": 15,
+    "coffee_table": 30, "end_table": 15, "nightstand": 25, "bookshelf": 40, "desk": 50, "dresser": 80, "wardrobe": 120,
+    "dining_table": 60, "dining_chair": 12, "lamp": 6, "wall_art": 5, "mirror": 15, "clock": 2, "rug": 15,
+    "bed_frame": 60, "mattress": 60, "headboard": 30, "bedding": 5, "tv_stand": 60, "tv": 40, "electronics": 15,
+    "large_appliance": 150, "small_appliance": 8, "cookware": 10, "dishes": 10, "utensils": 3, "towels": 3,
+    "curtains": 3, "clothing": 5, "medical": 20, "other": 20
+  }
+}

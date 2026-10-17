@@ -11,7 +11,8 @@ const {
     requireRole
 } = require('./auth.cjs');
 const {categories, areas, depot, coordsFor, screening} = require('./meta.cjs');
-const vision = require('./vision.cjs');
+const vision = require('./vision.cjs'); // video intake (../vision-service)
+const photoScan = require('./photo-scan.cjs'); // single-photo scan on OCI
 const geo = require('./geo.cjs');
 
 const app = express();
@@ -159,9 +160,9 @@ const TASK_SQL = `SELECT t.*,
 // ---------- Public ----------
 app.get('/api/health', h(async (req, res) => {
     await db.query('SELECT 1');
-    res.json({ok: true, storage: 'MySQL', visionConfigured: vision.isConfigured(), visionModel: vision.isConfigured() ? vision.MODEL : null, routing: geo.OSRM_URL});
+    res.json({ok: true, storage: 'MySQL', visionConfigured: photoScan.isConfigured(), visionModel: photoScan.isConfigured() ? photoScan.MODEL : null, routing: geo.OSRM_URL});
 }));
-app.get('/api/meta', (req, res) => res.json({categories, areas: Object.keys(areas), visionConfigured: vision.isConfigured()}));
+app.get('/api/meta', (req, res) => res.json({categories, areas: Object.keys(areas), visionConfigured: photoScan.isConfigured()}));
 
 // ---------- Auth ----------
 async function startSession(res, user, status = 200) {
@@ -284,14 +285,23 @@ app.post('/api/furniture', requireRole('donor'), h(async (req, res) => {
     if (d.photo && !/^data:image\/(png|jpeg|webp);base64,/.test(d.photo)) return fail(res, 400, 'Photo must be a JPEG, PNG or WebP image');
     const location = str(d.location, 120), address = str(d.address, 200) || null, notes = str(d.notes, 400);
     const c = await geo.locate(address, location);
-    const flags = screening({category: d.category, notes, photo: d.photo}).flags;
-    const scanning = !!d.photo && vision.isConfigured();
+    // A video-intake item: the AI verdict is re-read from the vision service, never taken from the browser.
+    let visionResult = null, photo = d.photo || null;
+    if (d.vision) {
+        const v = await vision.resultForItem(d.vision.intakeId, d.vision.itemIndex, req.user.id);
+        visionResult = v.stored;
+        photo = photo || v.photo;
+    }
+    const flags = screening({category: d.category, notes, photo}).flags;
+    // Photo-only donations get the OCI photo scan; video donations already carry their analysis.
+    const scanning = !visionResult && !!photo && photoScan.isConfigured();
     const {insertId} = await db.query(`INSERT INTO furniture (donor_id, name, category, dimensions, weight_kg, pickup_area, pickup_address,
                                                               lat, lng, geo_precise, notes, photo, screening_flags, vision_result)
                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [req.user.id, str(d.name, 100), d.category, str(d.dimensions, 100) || 'Not supplied', Math.min(9999, Math.max(0, Number(d.weight) || 0)), location, address,
-            c.lat, c.lng, c.precise ? 1 : 0, notes, d.photo || null, JSON.stringify(flags), scanning ? JSON.stringify({status: 'scanning'}) : null]);
-    await log(req.user.id, `Donation submitted: ${str(d.name, 100)} by ${req.user.name}`);
+            c.lat, c.lng, c.precise ? 1 : 0, notes, photo, JSON.stringify(flags),
+            visionResult ? JSON.stringify(visionResult) : scanning ? JSON.stringify({status: 'scanning'}) : null]);
+    await log(req.user.id, `Donation submitted${visionResult ? ' via video' : ''}: ${str(d.name, 100)} by ${req.user.name}`);
     // The photo scan takes a few seconds, so it runs after the response; the item shows "scanning" until it finishes.
     if (scanning) scanFurniture(insertId).catch(e => console.error('Photo scan failed:', e));
     res.status(201).json(toFurniture(await db.one(FURNITURE_SQL + ' WHERE f.id = ?', [insertId])));
@@ -373,10 +383,11 @@ app.get('/api/donors/:id/furniture', requireRole('admin'), h(async (req, res) =>
     });
 }));
 app.post('/api/furniture/:id/scan', requireRole('admin'), h(async (req, res) => {
-    const f = await db.one('SELECT id, photo FROM furniture WHERE id = ?', [req.params.id]);
+    const f = await db.one('SELECT id, photo, vision_result FROM furniture WHERE id = ?', [req.params.id]);
     if (!f) return fail(res, 404, 'Donation not found');
     if (!f.photo) return fail(res, 400, 'This donation has no photo');
-    if (!vision.isConfigured()) return fail(res, 503, 'Photo scanning is not configured (OCI credentials missing)');
+    if (parseJson(f.vision_result, {}).source === 'video') return fail(res, 400, 'This donation was analyzed from its video');
+    if (!photoScan.isConfigured()) return fail(res, 503, 'Photo scanning is not configured (OCI credentials missing)');
     await scanFurniture(f.id);
     res.json(toFurniture(await db.one(FURNITURE_SQL + ' WHERE f.id = ?', [f.id])));
 }));
@@ -613,39 +624,45 @@ app.post('/api/admin/reset', requireRole('admin'), h(async (req, res) => {
 
 // ---------- Screening ----------
 app.post('/api/screen', requireRole('donor', 'admin'), (req, res) => res.json(screening(req.body || {})));
-// ---------- Photo scan (OCI AI Vision + OCI Generative AI, see server/vision.cjs) ----------
+// ---------- Photo scan (OCI AI Vision + OCI Generative AI, see server/photo-scan.cjs) ----------
 async function scanFurniture(id) {
     const f = await db.one('SELECT * FROM furniture WHERE id = ?', [id]);
-    if (!f?.photo || !vision.isConfigured()) return null;
+    if (!f?.photo || !photoScan.isConfigured() || parseJson(f.vision_result, {}).source === 'video') return null;
     await db.query('UPDATE furniture SET vision_result = ? WHERE id = ?', [JSON.stringify({status: 'scanning'}), id]);
     let result;
     try {
-        result = await vision.analyzePhoto({photo: f.photo, category: f.category, name: f.name, notes: f.notes});
+        result = await photoScan.analyzePhoto({photo: f.photo, category: f.category, name: f.name, notes: f.notes});
     } catch (e) {
         console.error('Photo scan error:', e.message);
         result = {status: 'error', error: String(e.message).slice(0, 200), scannedAt: new Date().toISOString()};
     }
-    const flags = parseJson(f.screening_flags, []).filter(x => !x.startsWith('Photo scan')).concat(vision.flagsFor(result));
+    const flags = parseJson(f.screening_flags, []).filter(x => !x.startsWith('Photo scan')).concat(photoScan.flagsFor(result));
     await db.query('UPDATE furniture SET vision_result = ?, screening_flags = ? WHERE id = ?', [JSON.stringify(result), JSON.stringify(flags), id]);
     return result;
 }
 
 // Preview scan from the donation form (nothing is stored). Limited per user because each scan calls OCI.
 const scanTimes = new Map();
-app.post('/api/vision', requireRole('donor', 'admin'), h(async (req, res) => {
-    if (!vision.isConfigured()) return fail(res, 503, 'Photo scanning is not configured (OCI credentials missing)');
+app.post('/api/vision/photo', requireRole('donor', 'admin'), h(async (req, res) => {
+    if (!photoScan.isConfigured()) return fail(res, 503, 'Photo scanning is not configured (OCI credentials missing)');
     const recent = (scanTimes.get(req.user.id) || []).filter(t => Date.now() - t < 60000);
     if (recent.length >= 6) return fail(res, 429, 'Too many photo scans. Please wait a minute.');
     scanTimes.set(req.user.id, [...recent, Date.now()]);
     const b = req.body || {};
     try {
-        res.json(await vision.analyzePhoto({photo: b.photo, category: str(b.category, 40), name: str(b.name, 100), notes: str(b.notes, 400)}));
+        res.json(await photoScan.analyzePhoto({photo: b.photo, category: str(b.category, 40), name: str(b.name, 100), notes: str(b.notes, 400)}));
     } catch (e) {
         if (e.status === 400) return fail(res, 400, e.message);
         console.error('Photo scan error:', e.message);
         fail(res, 502, 'The photo scan service did not respond. You can still submit; an admin will review the photo.');
     }
 }));
+
+// Video intake (see server/vision.cjs and ../vision-service).
+app.get('/api/vision/status', requireRole(), h(async (req, res) => res.json(await vision.status())));
+app.post('/api/vision/video', requireRole('donor'), h(async (req, res) => res.json(await vision.analyzeVideo(req, req.user.id))));
+// Unauthenticated so <img>/<video> tags work; paths contain an unguessable 128-bit id.
+app.get('/api/vision/media/*', (req, res) => vision.pipeMedia(req.params[0], req, res));
 
 app.use('/api', (req, res) => fail(res, 404, 'Not found'));
 
@@ -659,6 +676,7 @@ app.use((err, req, res, next) => {
     console.error(err);
     if (res.headersSent) return next(err);
     if (err.type === 'entity.too.large') return fail(res, 413, 'Upload is too large');
+    if (err instanceof vision.VisionError) return fail(res, err.status, err.message);
     if (err.code === 'ECONNREFUSED' || err.code === 'ER_ACCESS_DENIED_ERROR' || err.code === 'ER_BAD_DB_ERROR') return fail(res, 503, 'Database unavailable: check the MYSQL_* settings in .env');
     fail(res, 500, 'Server error');
 });

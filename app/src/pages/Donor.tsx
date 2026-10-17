@@ -1,14 +1,15 @@
 import {useEffect, useState} from 'react';
-import {ArrowRight, Camera, ClipboardCheck, Loader2, Plus, Trash2, Upload} from 'lucide-react';
+import {ArrowRight, Camera, ClipboardCheck, Loader2, Plus, Sparkles, Trash2, Upload, Video} from 'lucide-react';
 import {request, useAction, useApp, useLoad} from '../api';
-import {Badge, Empty, FurnitureCard, Modal, PageHeader, PhotoScan} from '../ui';
-import type {Furniture, VisionResult} from '../types';
+import {Badge, Empty, FurnitureCard, Modal, PageHeader, PhotoScan, photoScanOf} from '../ui';
+import type {Furniture, PhotoScanResult} from '../types';
+import {hasVideo, OutcomeBadge, VideoIntake} from './VideoIntake';
 
 const blank = {name: '', category: 'Dining table', location: '', address: '', dimensions: '', notes: '', weight: 20, photo: ''};
 
 // Reloads a list every few seconds while any of its photo scans is still running.
 export function useScanRefresh(items: Furniture[] | null, reload: () => unknown) {
-    const scanning = !!items?.some(f => f.visionResult?.status === 'scanning');
+    const scanning = !!items?.some(f => photoScanOf(f.visionResult)?.status === 'scanning');
     useEffect(() => {
         if (!scanning) return;
         const t = setTimeout(reload, 3000);
@@ -16,10 +17,10 @@ export function useScanRefresh(items: Furniture[] | null, reload: () => unknown)
     }, [scanning, items, reload]);
 }
 
-export function DonationForm({onClose, onSaved}: { onClose: () => void, onSaved: () => void }) {
+export function DonationForm({onClose, onSaved, onVideo}: { onClose: () => void, onSaved: () => void, onVideo: () => void }) {
     const {user, meta, setError, notify} = useApp();
     const [form, setForm] = useState({...blank, location: user.area || meta.areas[0], address: user.role === 'donor' ? user.address || '' : ''});
-    const [scan, setScan] = useState<VisionResult | null>(null), [scanning, setScanning] = useState(false);
+    const [scan, setScan] = useState<PhotoScanResult | null>(null), [scanning, setScanning] = useState(false);
     const [check, setCheck] = useState<{ recommendation: string, flags: string[], source: string } | null>(null);
     const [busy, setBusy] = useState(false);
     const fileChange = (file?: File) => {
@@ -43,7 +44,7 @@ export function DonationForm({onClose, onSaved}: { onClose: () => void, onSaved:
         if (!form.photo) return setError('Upload a photo first');
         setScanning(true);
         try {
-            setScan(await request('/vision', 'POST', {photo: form.photo, category: form.category, name: form.name, notes: form.notes}))
+            setScan(await request('/vision/photo', 'POST', {photo: form.photo, category: form.category, name: form.name, notes: form.notes}))
         } catch (e) {
             setError((e as Error).message)
         } finally {
@@ -93,6 +94,7 @@ export function DonationForm({onClose, onSaved}: { onClose: () => void, onSaved:
                 <button type="button" className="secondary" onClick={photoScan} disabled={scanning || !form.photo || !meta.visionConfigured}
                         title={meta.visionConfigured ? 'Scan the photo with Oracle Cloud AI' : 'Photo scanning is not configured on the server'}>
                     {scanning ? <Loader2 size={17} className="spin"/> : <Camera size={17}/>} {scanning ? 'Scanning…' : 'AI photo check'}</button>
+                <button type="button" className="secondary" onClick={onVideo} title="Record a walk-around video; AI fills in the details"><Sparkles size={17}/> AI video intake</button>
             </div>
             <PhotoScan result={scan}/>
             {form.photo && meta.visionConfigured && !scan && <small className="hint">Your photo is scanned automatically when you submit, and the result is added to the description for the admin.</small>}
@@ -114,14 +116,18 @@ export function MyDonations() {
     const {data, reload} = useLoad<Furniture[]>('/furniture/mine');
     const {run} = useAction();
     useScanRefresh(data, reload);
-    const [modal, setModal] = useState(false);
+    const [modal, setModal] = useState<'form' | 'video' | null>(null);
     return <>
         <PageHeader eyebrow="MY DONATIONS" title="Furniture you've offered"
                     description="Everything here is stored under your donor account. Track each item from review to delivery."
-                    action={<button className="primary" onClick={() => setModal(true)}><Plus size={17}/> Donate an item</button>}/>
+                    action={<div className="hero-actions">
+                        <button className="secondary" onClick={() => setModal('video')}><Video size={17}/> Donate with a video</button>
+                        <button className="primary" onClick={() => setModal('form')}><Plus size={17}/> Donate an item</button>
+                    </div>}/>
         {data && !data.length && <Empty>You haven't offered anything yet. Click <b>Donate an item</b> to get started.</Empty>}
         <div className="donation-grid">{data?.map(f => <FurnitureCard key={f.id} item={f} badge={donorBadge(f)}
                                                                    footer={<><span>Submitted {f.createdAt.slice(0, 10)}</span><Badge value={f.inventoryStatus === 'rejected' ? 'rejected' : f.inventoryStatus}/></>}>
+            {hasVideo(f.visionResult) && f.status === 'pending' && <div className="flags"><OutcomeBadge outcome={f.visionResult.outcome}/></div>}
             {f.status === 'rejected' && f.reviewReason && <p className="review-note">Reason: {f.reviewReason}</p>}
             {f.status === 'pending' && <div className="item-buttons">
                 <button className="reject" onClick={() => confirm('Withdraw this donation?') && run('/furniture/' + f.id, 'DELETE', undefined, 'Donation withdrawn', reload)}>
@@ -129,6 +135,7 @@ export function MyDonations() {
                 </button>
             </div>}
         </FurnitureCard>)}</div>
-        {modal && <DonationForm onClose={() => setModal(false)} onSaved={reload}/>}
+        {modal === 'form' && <DonationForm onClose={() => setModal(null)} onSaved={reload} onVideo={() => setModal('video')}/>}
+        {modal === 'video' && <VideoIntake onClose={() => setModal(null)} onSaved={reload}/>}
     </>
 }

@@ -4,6 +4,7 @@ import {request, useApp, useLoad} from '../api';
 import {PageHeader, Stat} from '../ui';
 import type {Activity, Impact, Stats, User} from '../types';
 import {DonationForm} from './Donor';
+import {VideoIntake} from './VideoIntake';
 
 type Priority = { icon: React.ReactNode, tone: string, title: string, text: string, tab: string };
 
@@ -18,7 +19,7 @@ export function Overview() {
     const {user, go} = useApp();
     const {data: s, reload} = useLoad<Stats>('/stats');
     const {data: activity, reload: reloadActivity} = useLoad<Activity[]>(['admin', 'volunteer'].includes(user.role) ? '/activity' : null);
-    const [donating, setDonating] = useState(false);
+    const [donating, setDonating] = useState<'form' | 'video' | null>(null);
     const v = (k: string) => Number(s?.[k] ?? 0);
     const hero = HERO[user.role];
     const statCards: Record<string, React.ReactNode> = {
@@ -67,7 +68,7 @@ export function Overview() {
                 <h1>{hero.title.split(' ').slice(0, -2).join(' ')}<br/><em>{hero.title.split(' ').slice(-2).join(' ')}</em></h1>
                 <p>{hero.text}</p>
                 <div className="hero-actions">
-                    {user.role === 'donor' && <button className="primary" onClick={() => setDonating(true)}><Plus size={17}/> New donation</button>}
+                    {user.role === 'donor' && <button className="primary" onClick={() => setDonating('form')}><Plus size={17}/> New donation</button>}
                     {user.role === 'admin' && <button className="primary" onClick={() => go('donations')}><Camera size={17}/> Review donations</button>}
                     {hero.action && <button className="primary" onClick={() => go(hero.action!.tab)}>{hero.action.label} <ArrowRight size={17}/></button>}
                     <button className="secondary light" onClick={() => go('impact')}>See our impact <ArrowRight size={17}/></button>
@@ -106,7 +107,7 @@ export function Overview() {
                 <div className="priority-list">{priorities.map(p => <div className="priority" key={p.title}>
                     <span className={'round-icon ' + p.tone}>{p.icon}</span>
                     <div><strong>{p.title}</strong><p>{p.text}</p></div>
-                    <button onClick={() => p.title === 'Donate an item' ? setDonating(true) : go(p.tab)} aria-label={p.title}><ArrowRight size={18}/></button>
+                    <button onClick={() => p.title === 'Donate an item' ? setDonating('form') : go(p.tab)} aria-label={p.title}><ArrowRight size={18}/></button>
                 </div>)}</div>
             </section>
             {activity && <section className="panel">
@@ -118,7 +119,8 @@ export function Overview() {
                 </div>)}</div>
             </section>}
         </div>
-        {donating && <DonationForm onClose={() => setDonating(false)} onSaved={reload}/>}
+        {donating === 'form' && <DonationForm onClose={() => setDonating(null)} onSaved={reload} onVideo={() => setDonating('video')}/>}
+        {donating === 'video' && <VideoIntake onClose={() => setDonating(null)} onSaved={reload}/>}
     </>
 }
 
