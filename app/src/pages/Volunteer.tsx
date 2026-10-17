@@ -1,4 +1,4 @@
-import {CheckCircle2, MapPin, Package, Phone, Truck, User as UserIcon} from 'lucide-react';
+import {CheckCircle2, MapPin, Navigation, Package, Phone, Truck, User as UserIcon} from 'lucide-react';
 import {useAction, useLoad} from '../api';
 import {Badge, Empty, PageHeader, RouteView, shortDate} from '../ui';
 import type {Routes, Task} from '../types';
@@ -17,13 +17,17 @@ export function MyTasks() {
                 <div><span className="eyebrow dark">{t.type.toUpperCase()}</span><h3>{t.furnitureName}</h3></div>
                 <Badge value={t.status}/></div>
             <div className="task-meta">
-                <span><MapPin size={14}/>{t.type === 'pickup' ? 'Pick up in ' : 'Deliver to '}{t.area || 'area not set'}</span>
+                <span><MapPin size={14}/>{t.type === 'pickup' ? 'Pick up at ' : 'Deliver to '}{t.address ? `${t.address}, ${t.area}` : (t.area || 'area not set') + ' (no street address)'}</span>
                 <span><UserIcon size={14}/>{t.type === 'pickup' ? 'Donor: ' : 'Recipient: '}{t.contactName || '—'}</span>
                 {t.contactPhone && <span><Phone size={14}/>{t.contactPhone}</span>}
                 <span>{t.category} · {t.weight} kg · {t.scheduledFor ? 'Scheduled ' + shortDate(t.scheduledFor) : 'No date set'}</span>
             </div>
             {t.notes && <p className="task-notes">{t.notes}</p>}
-            <button className="primary wide" disabled={busy} onClick={() => complete(t)}><CheckCircle2 size={16}/> Mark {t.type === 'pickup' ? 'picked up' : 'delivered'}</button>
+            <div className="task-actions">
+                <a className="secondary" target="_blank" rel="noreferrer"
+                   href={'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(t.address ? t.address + ', Nashville, TN' : `${t.lat},${t.lng}`)}><Navigation size={15}/> Directions</a>
+                <button className="primary" disabled={busy} onClick={() => complete(t)}><CheckCircle2 size={16}/> Mark {t.type === 'pickup' ? 'picked up' : 'delivered'}</button>
+            </div>
         </div>)}</div>
         {!!done.length && <>
             <h2 className="section-title">History</h2>
@@ -41,7 +45,7 @@ export function RoutePlanner({mine}: { mine: boolean }) {
     const {data} = useLoad<Routes>('/routes');
     return <>
         <PageHeader eyebrow="LOGISTICS PLANNING" title={mine ? 'My route' : 'Smarter routes. More homes.'}
-                    description={mine ? 'Your open pickups and deliveries in a suggested order, starting and ending at the depot.' : 'Each volunteer\'s open tasks grouped into one route using a transparent distance heuristic.'}/>
+                    description={mine ? 'Your open pickups and deliveries in the shortest driving order, starting and ending at the depot.' : 'Each volunteer\'s open tasks planned as one road route, in the shortest driving order.'}/>
         {data && <RouteView routes={data}/>}
     </>
 }

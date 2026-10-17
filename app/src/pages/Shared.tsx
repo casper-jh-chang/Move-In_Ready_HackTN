@@ -58,7 +58,7 @@ export function Overview() {
     ] : [
         {icon: <Package size={19}/>, tone: 'sage', title: 'Browse furniture', text: `${v('available')} items available to request`, tab: 'browse'},
         {icon: <Send size={19}/>, tone: 'blue', title: 'My requests', text: `${v('pending') + v('approved')} in progress`, tab: 'requests'},
-        {icon: <Users size={19}/>, tone: 'amber', title: 'Update my profile', text: 'Set your area so deliveries are routed correctly', tab: 'profile'}
+        {icon: <Users size={19}/>, tone: 'amber', title: 'Update my profile', text: 'Add your street address so routes are planned correctly', tab: 'profile'}
     ];
     return <>
         <div className="welcome">
@@ -150,7 +150,7 @@ export function ImpactPage() {
 
 export function Profile({onUpdated}: { onUpdated: (u: User) => void }) {
     const {user, meta, setError, notify} = useApp();
-    const [form, setForm] = useState({name: user.name, phone: user.phone || '', area: user.area || meta.areas[0]});
+    const [form, setForm] = useState({name: user.name, phone: user.phone || '', area: user.area || meta.areas[0], address: user.address || ''});
     const save = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
@@ -162,13 +162,16 @@ export function Profile({onUpdated}: { onUpdated: (u: User) => void }) {
     };
     return <>
         <PageHeader eyebrow="MY PROFILE" title="Account details"
-                    description={user.role === 'user' ? 'Your area is used to plan deliveries to you.' : user.role === 'donor' ? 'Your area is the default pickup location for new donations.' : 'Your contact details.'}/>
+                    description={user.role === 'user' ? 'Your address is used to route deliveries to you. Only staff and your assigned volunteer see it.' : user.role === 'donor' ? 'Your address is the default pickup location for new donations. Recipients never see it.' : 'Your contact details.'}/>
         <form className="panel profile-form" onSubmit={save}>
             <div className="form-grid">
                 <label>Full name<input required value={form.name} onChange={e => setForm({...form, name: e.target.value})}/></label>
                 <label>Email<input value={user.email} disabled/></label>
                 <label>Area<select value={form.area} onChange={e => setForm({...form, area: e.target.value})}>{meta.areas.map(a => <option key={a}>{a}</option>)}</select></label>
                 <label>Phone<input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})}/></label>
+                {(user.role === 'user' || user.role === 'donor') && <label>Street address<input value={form.address} maxLength={200} placeholder="e.g. 615 Church St"
+                                                                                                onChange={e => setForm({...form, address: e.target.value})}/>
+                    <small className="hint">{user.address ? (user.geoPrecise ? 'Found on the map.' : 'Not found on the map; the area center is used.') : 'Without an address, routes use your area center.'}</small></label>}
             </div>
             <div className="modal-actions">
                 <button className="primary">Save changes</button>

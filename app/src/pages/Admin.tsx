@@ -1,7 +1,8 @@
 import {useState} from 'react';
-import {AlertTriangle, ArrowRight, Check, Plus, RotateCcw, Search, ShieldCheck, Truck, UserPlus, X} from 'lucide-react';
+import {AlertTriangle, ArrowRight, Camera, Check, Plus, RotateCcw, Search, ShieldCheck, Truck, UserPlus, X} from 'lucide-react';
 import {request, setToken, useAction, useApp, useLoad} from '../api';
-import {Badge, Empty, FurnitureCard, Modal, PageHeader, shortDate} from '../ui';
+import {Badge, Empty, FurnitureCard, Modal, PageHeader, PhotoScan, shortDate} from '../ui';
+import {useScanRefresh} from './Donor';
 import type {Furniture, FurnitureRequest, Role, Task, User} from '../types';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -36,14 +37,19 @@ function AssignModal({title, payload, onClose, onDone}: {
 }
 
 function ReviewModal({item, status, onClose, onDone}: { item: Furniture, status: 'approved' | 'rejected', onClose: () => void, onDone: () => unknown }) {
-    const [form, setForm] = useState({condition: status === 'approved' ? 'Good' : item.condition, reason: ''});
+    // Pre-select the condition the photo scan saw; the admin can change it.
+    const scanned = item.visionResult?.status === 'done' ? item.visionResult.visibleCondition : null;
+    const [form, setForm] = useState({condition: status === 'approved' ? (scanned === 'Like new' || scanned === 'Fair' ? scanned : scanned === 'Poor' ? 'Fair' : 'Good') : item.condition, reason: ''});
     const {run, busy} = useAction();
     const submit = async () => {
         if (await run(`/furniture/${item.id}/review`, 'POST', {status, ...form}, `${item.name} ${status}`, onDone)) onClose();
     };
     return <Modal eyebrow={status === 'approved' ? 'APPROVE DONATION' : 'REJECT DONATION'} title={item.name} onClose={onClose} onSubmit={submit}
                   description={`Donated by ${item.donorName} · ${item.category} · ${item.location}`}>
-        {!!item.screening.flags.length && <div className="review-result"><strong>Rule flags</strong>{item.screening.flags.map(f => <p key={f}>• {f}</p>)}</div>}
+        {item.photo && <img className="review-photo" src={item.photo} alt={item.name}/>}
+        {item.notes && <p className="review-desc">“{item.notes}”</p>}
+        <PhotoScan result={item.visionResult}/>
+        {!!item.screening.flags.length && <div className="review-result"><strong>Flags</strong>{item.screening.flags.map(f => <p key={f}>• {f}</p>)}</div>}
         <div className="form-grid">
             {status === 'approved' && <label>Verified condition<select value={form.condition} onChange={e => setForm({...form, condition: e.target.value})}>
                 {['Like new', 'Good', 'Fair'].map(c => <option key={c}>{c}</option>)}</select></label>}
@@ -61,6 +67,9 @@ function ReviewModal({item, status, onClose, onDone}: { item: Furniture, status:
 
 export function DonationReview() {
     const {data, reload} = useLoad<Furniture[]>('/furniture');
+    const {run, busy} = useAction();
+    const {meta} = useApp();
+    useScanRefresh(data, reload);
     const [filter, setFilter] = useState('pending'), [query, setQuery] = useState('');
     const [review, setReview] = useState<{ item: Furniture, status: 'approved' | 'rejected' } | null>(null), [assign, setAssign] = useState<Furniture | null>(null);
     const items = (data || []).filter(f => (filter === 'all' || f.status === filter) && (f.name + ' ' + f.donorName + ' ' + f.location).toLowerCase().includes(query.toLowerCase()));
@@ -69,7 +78,7 @@ export function DonationReview() {
         <PageHeader eyebrow="DONATION REVIEW" title="Review incoming donations"
                     description="Screen offers against acceptance rules, approve or reject them, then assign a volunteer to pick up approved items."/>
         <div className="notice"><ShieldCheck size={20}/>
-            <div><strong>Humans decide.</strong> Rule flags help you spot issues, but only an admin can approve a donation. The AI photo review is not connected yet.</div>
+            <div><strong>Humans decide.</strong> Rule flags and the Oracle Cloud photo scan (condition, visible issues, item type) help you spot problems, but only an admin can approve a donation.</div>
         </div>
         <div className="filter-row">
             <div className="segmented">{['pending', 'approved', 'rejected', 'all'].map(s => <button key={s} className={filter === s ? 'active' : ''} onClick={() => setFilter(s)}>
@@ -81,6 +90,9 @@ export function DonationReview() {
                                                                     footer={<><span>Donor: <b>{f.donorName}</b></span><Badge value={f.inventoryStatus}/></>}>
             {!!f.screening.flags.length && f.status === 'pending' && <div className="flags">{f.screening.flags.map(x => <span key={x}><AlertTriangle size={12}/>{x}</span>)}</div>}
             {f.reviewReason && <p className="review-note">Note: {f.reviewReason}</p>}
+            {f.status === 'pending' && f.photo && meta.visionConfigured && f.visionResult?.status !== 'scanning' &&
+                <button className="text-button rescan" disabled={busy} onClick={() => run(`/furniture/${f.id}/scan`, 'POST', {}, 'Photo scanned', reload)}>
+                    <Camera size={13}/> {f.visionResult ? 'Re-scan photo' : 'Scan photo'}</button>}
             {f.status === 'pending' && <div className="item-buttons">
                 <button className="approve" onClick={() => setReview({item: f, status: 'approved'})}><Check size={15}/> Approve</button>
                 <button className="reject" onClick={() => setReview({item: f, status: 'rejected'})}><X size={15}/> Reject</button>

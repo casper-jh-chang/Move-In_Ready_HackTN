@@ -7,6 +7,8 @@ export type User = {
     role: Role,
     phone?: string | null,
     area?: string | null,
+    address?: string | null,
+    geoPrecise?: boolean,
     active: boolean,
     createdAt?: string,
     donations?: number,
@@ -25,6 +27,8 @@ export type Furniture = {
     dimensions: string,
     weight: number,
     location: string,
+    address?: string | null,
+    geoPrecise?: boolean,
     lat: number,
     lng: number,
     notes: string,
@@ -32,13 +36,32 @@ export type Furniture = {
     status: 'pending' | 'approved' | 'rejected',
     inventoryStatus: 'pledged' | 'in_stock' | 'delivered' | 'rejected',
     screening: { flags: string[] },
-    visionResult: unknown,
+    visionResult: VisionResult | null,
     reviewReason?: string | null,
     reviewedAt?: string | null,
     createdAt: string,
     pickupTask?: { id: number, volunteerName: string } | null,
     pendingRequests?: number,
     myRequest?: string | null
+};
+
+// OCI photo scan stored on each donation (see server/vision.cjs).
+export type VisionResult =
+    | { status: 'scanning' }
+    | { status: 'error', error: string, scannedAt: string }
+    | {
+    status: 'done',
+    category: string,
+    matchesCategory: boolean,
+    visibleCondition: 'Like new' | 'Good' | 'Fair' | 'Poor' | 'Unclear',
+    visibleIssues: string[],
+    summary: string,
+    recommendation: 'review' | 'reject',
+    explanation: string,
+    labels: { name: string, confidence: number }[],
+    model: string,
+    scannedAt: string,
+    warnings: string[]
 };
 
 export type FurnitureRequest = {
@@ -76,20 +99,42 @@ export type Task = {
     contactName: string | null,
     contactPhone: string | null,
     area: string | null,
+    address: string | null,
+    geoPrecise: boolean,
     lat: number,
     lng: number
+};
+
+export type RouteStop = {
+    id: number,
+    label: string,
+    kind: 'pickup' | 'delivery',
+    area: string | null,
+    address: string | null,
+    precise: boolean,
+    contact: string | null,
+    lat: number,
+    lng: number,
+    legKm: number,
+    legMin: number
 };
 
 export type Routes = {
     depot: { lat: number, lng: number, name: string },
     trucks: {
         name: string,
-        stops: { id: number, label: string, kind: string, area: string, lat: number, lng: number }[],
-        distanceKm: number
+        stops: RouteStop[],
+        returnKm: number,
+        distanceKm: number,
+        durationMin: number,
+        geometry: [number, number][],
+        navigationUrl: string
     }[],
     optimizedKm: number,
     baselineKm: number,
     savingsPct: number,
+    totalMin: number,
+    provider: 'osrm' | 'straight-line',
     method: string
 };
 
@@ -104,4 +149,4 @@ export type Impact = {
     tripsCompleted: number
 };
 export type Activity = { id: number, text: string, actor: string | null, date: string };
-export type Meta = { categories: string[], areas: string[] };
+export type Meta = { categories: string[], areas: string[], visionConfigured?: boolean };

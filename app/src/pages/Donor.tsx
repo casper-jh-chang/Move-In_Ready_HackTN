@@ -1,21 +1,35 @@
-import {useState} from 'react';
-import {ArrowRight, Camera, ClipboardCheck, Plus, Trash2, Upload} from 'lucide-react';
+import {useEffect, useState} from 'react';
+import {ArrowRight, Camera, ClipboardCheck, Loader2, Plus, Trash2, Upload} from 'lucide-react';
 import {request, useAction, useApp, useLoad} from '../api';
-import {Badge, Empty, FurnitureCard, Modal, PageHeader} from '../ui';
-import type {Furniture} from '../types';
+import {Badge, Empty, FurnitureCard, Modal, PageHeader, PhotoScan} from '../ui';
+import type {Furniture, VisionResult} from '../types';
 
-const blank = {name: '', category: 'Dining table', location: '', dimensions: '', notes: '', weight: 20, photo: ''};
+const blank = {name: '', category: 'Dining table', location: '', address: '', dimensions: '', notes: '', weight: 20, photo: ''};
+
+// Reloads a list every few seconds while any of its photo scans is still running.
+export function useScanRefresh(items: Furniture[] | null, reload: () => unknown) {
+    const scanning = !!items?.some(f => f.visionResult?.status === 'scanning');
+    useEffect(() => {
+        if (!scanning) return;
+        const t = setTimeout(reload, 3000);
+        return () => clearTimeout(t);
+    }, [scanning, items, reload]);
+}
 
 export function DonationForm({onClose, onSaved}: { onClose: () => void, onSaved: () => void }) {
     const {user, meta, setError, notify} = useApp();
-    const [form, setForm] = useState({...blank, location: user.area || meta.areas[0]});
+    const [form, setForm] = useState({...blank, location: user.area || meta.areas[0], address: user.role === 'donor' ? user.address || '' : ''});
+    const [scan, setScan] = useState<VisionResult | null>(null), [scanning, setScanning] = useState(false);
     const [check, setCheck] = useState<{ recommendation: string, flags: string[], source: string } | null>(null);
     const [busy, setBusy] = useState(false);
     const fileChange = (file?: File) => {
         if (!file) return;
         if (file.size > 3_000_000) return setError('Please choose an image smaller than 3 MB');
         const reader = new FileReader();
-        reader.onload = () => setForm(f => ({...f, photo: String(reader.result)}));
+        reader.onload = () => {
+            setForm(f => ({...f, photo: String(reader.result)}));
+            setScan(null)
+        };
         reader.readAsDataURL(file)
     };
     const rulesCheck = async () => {
@@ -25,11 +39,22 @@ export function DonationForm({onClose, onSaved}: { onClose: () => void, onSaved:
             setError((e as Error).message)
         }
     };
+    const photoScan = async () => {
+        if (!form.photo) return setError('Upload a photo first');
+        setScanning(true);
+        try {
+            setScan(await request('/vision', 'POST', {photo: form.photo, category: form.category, name: form.name, notes: form.notes}))
+        } catch (e) {
+            setError((e as Error).message)
+        } finally {
+            setScanning(false)
+        }
+    };
     const submit = async () => {
         setBusy(true);
         try {
             await request('/furniture', 'POST', form);
-            notify('Donation submitted. An admin will review it soon.');
+            notify(form.photo && meta.visionConfigured ? 'Donation submitted. Your photo is being scanned for the admin.' : 'Donation submitted. An admin will review it soon.');
             onSaved();
             onClose();
         } catch (e) {
@@ -48,6 +73,8 @@ export function DonationForm({onClose, onSaved}: { onClose: () => void, onSaved:
                 {meta.categories.map(c => <option key={c}>{c}</option>)}</select></label>
             <label>Pickup area *<select value={form.location} onChange={e => setForm({...form, location: e.target.value})}>
                 {meta.areas.map(a => <option key={a}>{a}</option>)}</select></label>
+            <label>Street address<input value={form.address} maxLength={200} placeholder="e.g. 615 Church St (only shared with staff)"
+                                        onChange={e => setForm({...form, address: e.target.value})}/></label>
             <label>Dimensions<input value={form.dimensions} placeholder="e.g. 60 x 36 inches"
                                     onChange={e => setForm({...form, dimensions: e.target.value})}/></label>
             <label>Estimated weight (kg)<input type="number" min="0" value={form.weight}
@@ -63,9 +90,12 @@ export function DonationForm({onClose, onSaved}: { onClose: () => void, onSaved:
         <div className="review-area">
             <div className="review-buttons">
                 <button type="button" className="secondary" onClick={rulesCheck}><ClipboardCheck size={17}/> Check donation rules</button>
-                {/* Vision model placeholder: wire this button to /api/vision once server/vision.cjs is implemented. */}
-                <button type="button" className="secondary" disabled title="Vision model not implemented yet"><Camera size={17}/> AI photo review (coming soon)</button>
+                <button type="button" className="secondary" onClick={photoScan} disabled={scanning || !form.photo || !meta.visionConfigured}
+                        title={meta.visionConfigured ? 'Scan the photo with Oracle Cloud AI' : 'Photo scanning is not configured on the server'}>
+                    {scanning ? <Loader2 size={17} className="spin"/> : <Camera size={17}/>} {scanning ? 'Scanning…' : 'AI photo check'}</button>
             </div>
+            <PhotoScan result={scan}/>
+            {form.photo && meta.visionConfigured && !scan && <small className="hint">Your photo is scanned automatically when you submit, and the result is added to the description for the admin.</small>}
             {check && <div className="review-result">
                 <strong>Rules-only pre-screen: {check.recommendation.toUpperCase()}</strong>
                 {check.flags.length ? check.flags.map(f => <p key={f}>• {f}</p>) : <p>No rule issues found.</p>}
@@ -83,6 +113,7 @@ const donorBadge = (f: Furniture) => f.status !== 'approved' ? f.status : f.inve
 export function MyDonations() {
     const {data, reload} = useLoad<Furniture[]>('/furniture/mine');
     const {run} = useAction();
+    useScanRefresh(data, reload);
     const [modal, setModal] = useState(false);
     return <>
         <PageHeader eyebrow="MY DONATIONS" title="Furniture you've offered"
