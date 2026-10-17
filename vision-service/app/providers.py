@@ -322,23 +322,40 @@ def get_provider(s: Settings) -> Provider:
 _whisper = None
 
 
-def _local_whisper(s: Settings):
+def _local_whisper(s: Settings, device: str = "auto"):
     """faster-whisper, loaded once. The model downloads on first use (~460 MB for 'small')."""
     global _whisper
-    if _whisper is None:
+    if _whisper is None or device != "auto":
         try:
             from faster_whisper import WhisperModel
         except ImportError as e:
             raise RuntimeError("Local transcription needs: pip install -r requirements-local.txt") from e
-        _whisper = WhisperModel(s.whisper_model_size, device="auto", compute_type="int8")
+        _whisper = WhisperModel(s.whisper_model_size, device=device, compute_type="int8")
     return _whisper
 
 
 def transcribe(audio: Path, s: Settings) -> str:
     """Speech-to-text for frames mode. Video mode lets the model listen directly instead."""
     if s.transcribe_provider == "local":
-        segments, _ = _local_whisper(s).transcribe(str(audio), vad_filter=True)
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        # Hand Whisper samples, not a path: its own decoder goes through PyAV, and
+        # faster-whisper 1.2 passes an argument that PyAV 15+ no longer accepts.
+        import wave
+
+        import numpy as np
+
+        with wave.open(str(audio), "rb") as w:  # 16 kHz mono s16 from video.extract_audio
+            pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+        samples = pcm.astype(np.float32) / 32768.0
+        try:
+            segments, _ = _local_whisper(s).transcribe(samples, vad_filter=True)
+            return " ".join(seg.text.strip() for seg in segments).strip()
+        except RuntimeError as e:
+            # device="auto" picks CUDA whenever an NVIDIA GPU is present, even without cuBLAS/cuDNN.
+            if not any(k in str(e).lower() for k in ("cuda", "cublas", "cudnn")):
+                raise
+            log.warning("Whisper on GPU failed (%s); falling back to CPU", e)
+            segments, _ = _local_whisper(s, device="cpu").transcribe(samples, vad_filter=True)
+            return " ".join(seg.text.strip() for seg in segments).strip()
     if s.transcribe_provider != "openai" or not s.openai_api_key:
         return ""
     with audio.open("rb") as fh:
