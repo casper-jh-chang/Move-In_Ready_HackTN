@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Move-In Ready on OCI</title>
+<style>
+  :root {
+    --bg: #0f1424;
+    --stage: #151b2e;
+    --panel: #1d2540;
+    --line: #2e3a5f;
+    --text: #eef1f8;
+    --muted: #9aa5c4;
+    --accent: #f26b3a;      /* Oracle-ish red-orange */
+    --accent-2: #6ea8ff;
+    --ok: #4cc38a;
+    --warn: #f2b33a;
+    --bad: #ef5b5b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  body { overflow: hidden; }
+
+  /* Fixed 1600x900 stage, scaled to the window */
+  #deck { position: absolute; left: 50%; top: 50%; width: 1600px; height: 900px; transform-origin: center center; }
+  .slide { position: absolute; inset: 0; background: var(--stage); border-radius: 18px; padding: 64px 80px 56px;
+    display: none; flex-direction: column; box-shadow: 0 30px 80px rgba(0,0,0,.45); overflow: hidden; }
+  .slide.active { display: flex; }
+  .slide::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--accent); }
+
+  .kicker { font-size: 20px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+  h1 { font-size: 76px; line-height: 1.05; margin: 18px 0 0; letter-spacing: -.02em; }
+  h2 { font-size: 50px; line-height: 1.1; margin: 10px 0 28px; letter-spacing: -.01em; }
+  p, li { font-size: 26px; line-height: 1.45; color: var(--muted); }
+  b, strong { color: var(--text); }
+  code { font-family: Menlo, Consolas, monospace; font-size: .85em; color: #ffd28a; background: rgba(255,255,255,.06);
+    padding: 1px 7px; border-radius: 6px; }
+
+  .time { position: absolute; top: 34px; right: 48px; font: 600 18px Menlo, monospace; color: var(--muted);
+    border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; }
+  .footer { position: absolute; bottom: 22px; left: 80px; right: 48px; display: flex; justify-content: space-between;
+    font-size: 16px; color: #5d6890; }
+
+  .row { display: flex; gap: 40px; flex: 1; min-height: 0; }
+  .col { display: flex; flex-direction: column; min-height: 0; }
+  .shot { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  .shot img { width: 100%; height: 100%; object-fit: contain; object-position: top center; border-radius: 10px; min-height: 0; }
+  .shot .cap { font: 15px Menlo, monospace; color: #6f7aa0; text-align: center; }
+
+  /* Pipeline steps */
+  .steps { display: flex; flex-direction: column; gap: 14px; }
+  .step { display: flex; gap: 18px; align-items: flex-start; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px 20px; }
+  .step .n { flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: #fff;
+    font-weight: 800; font-size: 20px; display: grid; place-items: center; }
+  .step .t { font-size: 24px; color: var(--text); font-weight: 650; }
+  .step .d { font-size: 19px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+  .tag { display: inline-block; font: 700 14px Menlo, monospace; padding: 3px 9px; border-radius: 6px; margin-left: 8px;
+    vertical-align: 3px; background: rgba(242,107,58,.15); color: var(--accent); }
+  .tag.blue { background: rgba(110,168,255,.15); color: var(--accent-2); }
+
+  .verdicts { display: flex; gap: 10px; margin-top: 8px; }
+  .verdicts span { font: 700 16px Menlo, monospace; padding: 4px 12px; border-radius: 6px; }
+  .accept { background: rgba(76,195,138,.15); color: var(--ok); }
+  .review { background: rgba(242,179,58,.15); color: var(--warn); }
+  .decline { background: rgba(239,91,91,.15); color: var(--bad); }
+
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px 26px; }
+  .card .t { font-size: 26px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .card .d { font-size: 20px; color: var(--muted); line-height: 1.45; }
+
+  .motto { display: flex; gap: 28px; margin-top: 40px; }
+  .motto > div { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 30px; }
+  .motto .big { font-size: 40px; font-weight: 800; color: var(--text); }
+  .motto .small { font-size: 21px; color: var(--muted); margin-top: 10px; line-height: 1.4; }
+
+  .stats { display: flex; gap: 28px; margin-top: 36px; }
+  .stat { flex: 1; border-top: 3px solid var(--accent); padding-top: 16px; }
+  .stat .v { font-size: 48px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 19px; color: var(--muted); margin-top: 4px; }
+
+  /* Architecture diagram */
+  svg.arch text { font-family: -apple-system, "Segoe UI", Arial, sans-serif; }
+
+  /* Speaker notes */
+  #notes { position: fixed; left: 0; right: 0; bottom: 0; max-height: 34vh; overflow: auto; background: rgba(10,13,24,.96);
+    border-top: 1px solid var(--line); padding: 18px 28px; font-size: 18px; line-height: 1.5; color: #dfe4f2; display: none; z-index: 5; }
+  #notes.show { display: block; }
+  #notes h4 { margin: 0 0 6px; font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+  .hint { position: fixed; right: 16px; bottom: 12px; font-size: 13px; color: #4f5a80; z-index: 4; }
+  .nav { position: fixed; top: 0; bottom: 0; width: 18vw; z-index: 3; cursor: pointer; }
+  .nav.prev { left: 0; } .nav.next { right: 0; }
+  @media print {
+    body { overflow: visible; background: #fff; }
+    #deck { position: static; transform: none !important; width: auto; height: auto; }
+    .slide { display: flex !important; position: relative; width: 1600px; height: 900px; page-break-after: always; margin: 0 auto; }
+    .hint, .nav, #notes { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="deck">
+
+  <!-- 1. Title -->
+  <section class="slide" data-notes="Hi, we're ChineseCanFly. I'll spend two minutes on how Move-In Ready works under the hood, and why we built all of it on Oracle Cloud.">
+    <div style="margin-top:auto">
+      <div class="kicker">HackathonTN 2026 · Track 1 · Technical walkthrough</div>
+      <h1>Move-In Ready<br><span style="color:var(--muted);font-weight:600">screening furniture donations<br>on Oracle Cloud</span></h1>
+      <div class="motto" style="max-width:1200px">
+        <div><div class="big">AI describes</div><div class="small">OCI AI Vision + Generative AI read photos and videos</div></div>
+        <div><div class="big">Rules decide</div><div class="small">A deterministic rules engine names every reason</div></div>
+        <div><div class="big">Humans approve</div><div class="small">An admin makes every accept / reject call</div></div>
+      </div>
+    </div>
+    <div style="margin-top:auto"></div>
+    <div class="footer"><span>Team ChineseCanFly</span><span>Synthetic-data prototype · not affiliated with House2Home</span></div>
+  </section>
+
+  <!-- 2. Architecture -->
+  <section class="slide" data-notes="Charities waste volunteer trips on furniture they can't accept. We screen donations before pickup, and the whole stack runs on Oracle Cloud: one Compute VM, MySQL HeatWave in a private subnet, OCI AI Vision and OCI Generative AI.">
+    <div class="time">0:00 – 0:15</div>
+    <div class="kicker">Architecture</div>
+    <h2>One OCI region, four OCI services</h2>
+    <svg class="arch" viewBox="0 0 1440 600" width="1440" height="600" role="img" aria-label="Architecture diagram">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#6f7aa0"/></marker>
+      </defs>
+      <!-- browser -->
+      <rect x="20" y="40" width="250" height="110" rx="14" fill="#1d2540" stroke="#2e3a5f"/>
+      <text x="145" y="88" text-anchor="middle" fill="#eef1f8" font-size="24" font-weight="700">Browser</text>
+      <text x="145" y="118" text-anchor="middle" fill="#9aa5c4" font-size="17">donor · admin · volunteer</text>
+      <line x1="270" y1="95" x2="370" y2="95" stroke="#6f7aa0" stroke-width="2.5" marker-end="url(#ar)"/>
+      <text x="320" y="82" text-anchor="middle" fill="#6f7aa0" font-size="15">HTTPS</text>
+
+      <!-- compute VM -->
+      <rect x="380" y="16" width="1040" height="300" rx="18" fill="none" stroke="#f26b3a" stroke-width="2" stroke-dasharray="8 6"/>
+      <text x="400" y="46" fill="#f26b3a" font-size="18" font-weight="700">OCI Compute · Oracle Linux 9 VM (public subnet)</text>
+      <rect x="410" y="70" width="230" height="100" rx="12" fill="#1d2540" stroke="#2e3a5f"/>
+      <text x="525" y="112" text-anchor="middle" fill="#eef1f8" font-size="21" font-weight="700">Apache :443</text>
+      <text x="525" y="140" text-anchor="middle" fill="#9aa5c4" font-size="16">Let's Encrypt TLS</text>
+      <line x1="640" y1="120" x2="700" y2="120" stroke="#6f7aa0" stroke-width="2.5" marker-end="url(#ar)"/>
+      <rect x="710" y="70" width="320" height="100" rx="12" fill="#1d2540" stroke="#2e3a5f"/>
+      <text x="870" y="108" text-anchor="middle" fill="#eef1f8" font-size="21" font-weight="700">Node / Express API</text>
+      <text x="870" y="136" text-anchor="middle" fill="#9aa5c4" font-size="16">React build · photo scan · oci.cjs</text>
+      <line x1="1030" y1="120" x2="1090" y2="120" stroke="#6f7aa0" stroke-width="2.5" marker-end="url(#ar)"/>
+      <rect x="1100" y="70" width="300" height="100" rx="12" fill="#1d2540" stroke="#2e3a5f"/>
+      <text x="1250" y="108" text-anchor="middle" fill="#eef1f8" font-size="21" font-weight="700">FastAPI vision service</text>
+      <text x="1250" y="136" text-anchor="middle" fill="#9aa5c4" font-size="16">ffmpeg · Whisper · rules engine</text>
+      <text x="1400" y="46" text-anchor="end" fill="#6f7aa0" font-size="15">built by a Resource Manager (Terraform) stack · systemd services</text>
+
+      <!-- arrows down -->
+      <line x1="790" y1="170" x2="250" y2="420" stroke="#6f7aa0" stroke-width="2.5" marker-end="url(#ar)"/>
+      <line x1="870" y1="170" x2="720" y2="420" stroke="#6f7aa0" stroke-width="2.5" marker-end="url(#ar)"/>
+      <line x1="950" y1="170" x2="1110" y2="420" stroke="#6f7aa0" stroke-width="2.5" marker-end="url(#ar)"/>
+      <line x1="1250" y1="170" x2="1200" y2="420" stroke="#6f7aa0" stroke-width="2.5" marker-end="url(#ar)"/>
+      <text x="335" y="350" text-anchor="end" fill="#6f7aa0" font-size="15">MySQL protocol</text>
+      <text x="760" y="372" fill="#6f7aa0" font-size="15">signed REST</text>
+      <text x="1240" y="372" fill="#6f7aa0" font-size="15">OCI Python SDK</text>
+
+      <!-- OCI services -->
+      <g>
+        <rect x="60" y="430" width="380" height="140" rx="14" fill="#1d2540" stroke="#f26b3a" stroke-width="2"/>
+        <text x="250" y="478" text-anchor="middle" fill="#eef1f8" font-size="25" font-weight="800">MySQL HeatWave</text>
+        <text x="250" y="510" text-anchor="middle" fill="#9aa5c4" font-size="17">private subnet · only the VM connects</text>
+        <text x="250" y="538" text-anchor="middle" fill="#9aa5c4" font-size="17">users, donations, requests, tasks</text>
+      </g>
+      <g>
+        <rect x="530" y="430" width="380" height="140" rx="14" fill="#1d2540" stroke="#f26b3a" stroke-width="2"/>
+        <text x="720" y="478" text-anchor="middle" fill="#eef1f8" font-size="25" font-weight="800">OCI AI Vision</text>
+        <text x="720" y="510" text-anchor="middle" fill="#9aa5c4" font-size="17">analyzeImage</text>
+        <text x="720" y="538" text-anchor="middle" fill="#9aa5c4" font-size="17">classification + object detection</text>
+      </g>
+      <g>
+        <rect x="1000" y="430" width="380" height="140" rx="14" fill="#1d2540" stroke="#f26b3a" stroke-width="2"/>
+        <text x="1190" y="478" text-anchor="middle" fill="#eef1f8" font-size="25" font-weight="800">OCI Generative AI</text>
+        <text x="1190" y="510" text-anchor="middle" fill="#9aa5c4" font-size="17">chat · Llama 4 Maverick (on demand)</text>
+        <text x="1190" y="538" text-anchor="middle" fill="#9aa5c4" font-size="17">photos and video keyframes</text>
+      </g>
+    </svg>
+    <div class="footer"><span>Region us-chicago-1</span><span>docs/oracle-cloud.md</span></div>
+  </section>
+
+  <!-- 3. Photo scan -->
+  <section class="slide" data-notes="A photo first goes to OCI AI Vision for object detection, about 1.3 seconds. Those labels become hints for OCI Generative AI, Llama 4 Maverick, which writes a structured condition report as JSON. If Vision fails, we fall back to Generative AI alone. The model only describes. It can't approve anything; its output becomes flags on the admin's review card.">
+    <div class="time">0:15 – 0:45</div>
+    <div class="kicker">Photo scan · app/server/photo-scan.cjs</div>
+    <h2>Two OCI AI services, chained</h2>
+    <div class="row">
+      <div class="col" style="width:560px;flex:none">
+        <div class="steps">
+          <div class="step"><div class="n">1</div><div><div class="t">OCI AI Vision<span class="tag">~1.3 s</span></div>
+            <div class="d"><code>analyzeImage</code>: labels and objects with ≥ 60% confidence</div></div></div>
+          <div class="step"><div class="n">2</div><div><div class="t">OCI Generative AI<span class="tag">1–2 s</span></div>
+            <div class="d">Llama 4 Maverick reads the photo plus the labels as hints → JSON: item, condition, issues, summary</div></div></div>
+          <div class="step"><div class="n">3</div><div><div class="t">Flags for the admin</div>
+            <div class="d">"looks like a cabinet, not the listed category", "condition poor". <b>Never auto-approves.</b></div></div></div>
+          <div class="step"><div class="n">↺</div><div><div class="t">Graceful fallback</div>
+            <div class="d">If Vision is down, the scan continues on Generative AI alone and records a warning</div></div></div>
+        </div>
+      </div>
+      <div class="shot"><img src="oci-code/05_oci-genai-photo-chat.png" alt="OCI Generative AI chat call code"></div>
+    </div>
+    <div class="footer"><span>Screenshots 03 – 06 in the appendix</span><span>Prompt ignores any text written inside the image</span></div>
+  </section>
+
+  <!-- 4. Video intake -->
+  <section class="slide" data-notes="For a walk-around video, ffmpeg picks the 8 sharpest keyframes, and the browser's live captions or Whisper give us the narration. One Generative AI call returns every item, its defects with timestamps, and a sleeper-sofa check. Then a deterministic rules engine turns those facts into accept, review or decline, and names the rule that fired. The model is configuration: whole-video Gemini is one environment variable away once our quota allows it.">
+    <div class="time">0:45 – 1:15</div>
+    <div class="kicker">Video intake · vision-service/</div>
+    <h2>A walk-around video becomes a checked donation</h2>
+    <div class="row">
+      <div class="col" style="width:640px;flex:none">
+        <div class="steps">
+          <div class="step"><div class="n">1</div><div><div class="t">ffmpeg keyframes</div>
+            <div class="d">8 segments, sharpest frame from each</div></div></div>
+          <div class="step"><div class="n">2</div><div><div class="t">Narration</div>
+            <div class="d">Live browser captions, or faster-whisper on the server</div></div></div>
+          <div class="step"><div class="n">3</div><div><div class="t">One OCI Generative AI call<span class="tag">~5 s for a 12 s clip</span></div>
+            <div class="d">Every item, condition, defects with timestamps, sleeper-sofa check, pets / smoking</div></div></div>
+          <div class="step"><div class="n">4</div><div><div class="t">Deterministic rules engine<span class="tag blue">house2home.json</span></div>
+            <div class="d">Facts → a verdict, plus the rule that fired
+              <div class="verdicts"><span class="accept">ACCEPT</span><span class="review">REVIEW</span><span class="decline">DECLINE</span></div></div></div></div>
+        </div>
+      </div>
+      <div class="shot"><img src="oci-code/09_oci-genai-video-sdk.png" alt="OCIProvider code in the vision service"></div>
+    </div>
+    <div class="footer"><span>Today: frames mode + Llama 4 Maverick · Gemini video mode is one env var (screenshot 10)</span><span>providers.py</span></div>
+  </section>
+
+  <!-- 5. Engineering -->
+  <section class="slide" data-notes="A few engineering choices. In Node we sign OCI requests ourselves with RSA-SHA256 HTTP Signatures, so there's no SDK dependency. Scans run after the HTTP response, so the donor never waits. And the server re-reads the AI verdict from the vision service and checks it belongs to that donor, instead of trusting whatever the browser sends.">
+    <div class="time">1:15 – 1:35</div>
+    <div class="kicker">Engineering</div>
+    <h2>Small, safe, fast</h2>
+    <div class="cards">
+      <div class="card"><div class="t">Hand-signed OCI calls</div>
+        <div class="d">RSA-SHA256 HTTP Signature in ~20 lines of Node: no SDK, one API key for every service.</div></div>
+      <div class="card"><div class="t">Async scanning</div>
+        <div class="d">Respond first, scan after. The item shows "scanning…" and fills in a few seconds later.</div></div>
+      <div class="card"><div class="t">Tamper-proof verdicts</div>
+        <div class="d">The server re-reads the AI result and checks the donor owns it. The browser can't inject one.</div></div>
+    </div>
+    <div class="shot" style="margin-top:26px"><img src="oci-code/01_oci-request-signing.png" alt="OCI request signing code"></div>
+    <div class="footer"><span>app/server/oci.cjs · app/server/index.cjs</span><span>Photo preview endpoint is rate-limited per user</span></div>
+  </section>
+
+  <!-- 6. Data + deploy -->
+  <section class="slide" data-notes="MySQL HeatWave sits in a private subnet that only our VM can reach. Schema and migrations apply on every start, so redeploys are safe. The infrastructure came from an OCI Resource Manager Terraform stack, and one script redeploys both services to Compute.">
+    <div class="time">1:35 – 1:55</div>
+    <div class="kicker">Data + deployment</div>
+    <h2>HeatWave in a private subnet, one-command deploys</h2>
+    <div class="row">
+      <div class="col" style="flex:1;gap:16px">
+        <div class="step"><div class="n">DB</div><div><div class="t">MySQL HeatWave</div>
+          <div class="d">Private subnet, app user scoped to one database; schema + migrations run on startup</div></div></div>
+        <div class="shot"><img src="oci-code/11_mysql-heatwave.png" alt="MySQL HeatWave connection pool code"></div>
+      </div>
+      <div class="col" style="flex:1.35;gap:16px">
+        <div class="step"><div class="n">VM</div><div><div class="t">OCI Compute + Resource Manager</div>
+          <div class="d">Terraform stack built the VCN, VM and database; <code>deploy.sh</code> ships both services via systemd</div></div></div>
+        <div class="shot"><img src="oci-code/13_deploy-oci-compute.png" alt="Deploy script code"></div>
+      </div>
+    </div>
+    <div class="footer"><span>app/server/db.cjs · app/deploy.sh</span><span>docs/oracle-cloud.md</span></div>
+  </section>
+
+  <!-- 7. Close -->
+  <section class="slide" data-notes="So: AI describes, rules decide, humans approve, all on Oracle Cloud. Thank you!">
+    <div class="time">1:55 – 2:00</div>
+    <div style="margin:auto 0">
+      <div class="kicker">Takeaway</div>
+      <h1>AI describes. Rules decide.<br>Humans approve.</h1>
+      <p style="font-size:32px;margin-top:22px">All on Oracle Cloud: Compute · MySQL HeatWave · AI Vision · Generative AI</p>
+      <div class="stats">
+        <div class="stat"><div class="v">~1.3 s</div><div class="l">AI Vision object detection</div></div>
+        <div class="stat"><div class="v">1–2 s</div><div class="l">Generative AI photo report</div></div>
+        <div class="stat"><div class="v">~5 s</div><div class="l">12-second video, end to end</div></div>
+        <div class="stat"><div class="v">0</div><div class="l">auto-approvals: an admin decides</div></div>
+      </div>
+    </div>
+    <div class="footer"><span>Team ChineseCanFly · Thank you</span><span>Timings measured on the OCI server (docs/oracle-cloud.md)</span></div>
+  </section>
+
+  <!-- Appendix slides are generated from APPENDIX below -->
+</div>
+
+<div id="notes"><h4>Speaker notes</h4><div id="notes-body"></div></div>
+<div class="nav prev" title="Previous"></div><div class="nav next" title="Next"></div>
+<div class="hint">← → navigate · N notes · F fullscreen · <span id="pos"></span></div>
+
+<script>
+  const APPENDIX = [
+    ['01_oci-request-signing', 'OCI REST client: HTTP Signature signed by hand'],
+    ['02_oci-api-key-profile', 'One API-key profile for every OCI call'],
+    ['03_oci-ai-vision', 'OCI AI Vision: analyzeImage'],
+    ['04_oci-genai-photo-prompt', 'Photo-scan prompt'],
+    ['05_oci-genai-photo-chat', 'OCI Generative AI: multimodal chat'],
+    ['06_photo-scan-pipeline', 'Vision → GenAI pipeline with fallback'],
+    ['07_api-async-scan', 'Async scan on donation submit'],
+    ['08_api-scan-endpoints', 'Background scan job + rate-limited preview'],
+    ['09_oci-genai-video-sdk', 'Video intake: OCIProvider (Python SDK)'],
+    ['10_oci-genai-video-config', 'Frames mode vs video mode configuration'],
+    ['11_mysql-heatwave', 'MySQL HeatWave connection pool'],
+    ['12_heatwave-migrations', 'Schema and migrations on startup'],
+    ['13_deploy-oci-compute', 'Deploy to OCI Compute'],
+  ];
+  const deck = document.getElementById('deck');
+  APPENDIX.forEach(([file, title], i) => {
+    const s = document.createElement('section');
+    s.className = 'slide';
+    s.dataset.notes = 'Appendix: code reference, not part of the 2-minute talk.';
+    s.innerHTML = `<div class="kicker">Appendix · OCI code ${String(i + 1).padStart(2, '0')} / ${APPENDIX.length}</div>
+      <h2 style="margin-bottom:18px">${title}</h2>
+      <div class="shot"><img src="oci-code/${file}.png" alt="${title}" loading="lazy"></div>
+      <div class="footer"><span>docs/pitch/oci-code/${file}.png</span><span>Move-In Ready on OCI</span></div>`;
+    deck.appendChild(s);
+  });
+
+  const slides = [...document.querySelectorAll('.slide')];
+  const notes = document.getElementById('notes'), notesBody = document.getElementById('notes-body'), pos = document.getElementById('pos');
+  let cur = 0;
+  try { cur = Math.min(slides.length - 1, Math.max(0, parseInt(location.hash.slice(1), 10) - 1 || 0)); } catch (e) {}
+
+  function show(i) {
+    cur = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, k) => s.classList.toggle('active', k === cur));
+    notesBody.textContent = slides[cur].dataset.notes || '';
+    pos.textContent = `${cur + 1} / ${slides.length}`;
+    history.replaceState(null, '', '#' + (cur + 1));
+  }
+  function fit() {
+    const k = Math.min(innerWidth / 1640, innerHeight / 940);
+    deck.style.transform = `translate(-50%, -50%) scale(${k})`;
+  }
+  addEventListener('resize', fit);
+  addEventListener('keydown', e => {
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); show(cur + 1); }
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); show(cur - 1); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key.toLowerCase() === 'n') notes.classList.toggle('show');
+    else if (e.key.toLowerCase() === 'f') document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.();
+  });
+  document.querySelector('.nav.prev').onclick = () => show(cur - 1);
+  document.querySelector('.nav.next').onclick = () => show(cur + 1);
+  fit(); show(cur);
+</script>
+</body>
+</html>
