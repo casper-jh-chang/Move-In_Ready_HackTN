@@ -134,6 +134,8 @@ docs/
   h2h-outreach-email.md     Outreach email draft
   video-intake.md           Video pre-screening: design, rules, setup (in Chinese)
   oracle-cloud.md           How OCI is used: GenAI, AI Vision, MySQL HeatWave, Compute, setup
+  test-report.md            Function test results and known errors (live site)
+  demo-guide.md             30-second presentation plan and setup checklist
 app/                        Web app: React frontend, Express API, MySQL (donors, admins, volunteers, recipients)
   src/pages/VideoIntake.tsx Record/upload a walk-around video, review AI results, submit
   server/vision.cjs         Streams videos to the vision service, stores its verdict
